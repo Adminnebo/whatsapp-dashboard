@@ -1,0 +1,16 @@
+{
+  "name": "dashboard-ws-dinamico",
+  "version": "1.0.0",
+  "description": "Dashboard de conversaciones WhatsApp (full-stack): Express + Postgres, sirve el frontend y expone /api. Reemplaza los webhooks de n8n para lo que es solo BD/GHL.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "pg": "^8.11.5"
+  }
+}

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Conversaciones · WhatsApp Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css?v=16" />
+</head>
+<body>
+  <!-- ============ APP SHELL ============ -->
+  <div id="app" class="app">
+
+    <!-- Rail / barra lateral de iconos (estilo GHL) -->
+    <nav class="rail">
+      <div class="rail__logo">W</div>
+      <button class="rail__btn rail__btn--active" title="Conversaciones">
+        <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/></svg>
+      </button>
+      <button class="rail__btn" title="Contactos">
+        <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+      </button>
+      <button class="rail__btn" title="Calendario">
+        <svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 16H5V9h14v11z"/></svg>
+      </button>
+      <div class="rail__spacer"></div>
+      <button class="rail__btn" id="btnTheme" title="Modo claro / oscuro">
+        <svg class="icon-moon" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.39 5.39 0 0 1-4.4 2.26 5.4 5.4 0 0 1-5.4-5.4c0-1.81.89-3.41 2.26-4.4-.44-.06-.9-.1-1.36-.1z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" style="display:none"><path d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-5v3m0 14v3m9-10h-3M6 12H3m14.95-6.95-2.12 2.12M8.17 15.83l-2.12 2.12m0-12.9 2.12 2.12m9.66 9.66-2.12-2.12"/></svg>
+      </button>
+      <button class="rail__btn" id="btnSettings" title="Ajustes / Conexión n8n">
+        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.5.5 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.59-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.49.49 0 0 0-.49-.42h-3.84a.49.49 0 0 0-.49.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.59.22L2.74 8.87a.5.5 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94 0 .32.02.64.07.94l-2.03 1.58a.5.5 0 0 0-.12.61l1.92 3.32c.12.22.39.3.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.25.42.49.42h3.84c.24 0 .44-.18.49-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.5.5 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+      </button>
+      <div class="rail__avatar">JD</div>
+    </nav>
+
+    <!-- ============ PANEL 1: lista de conversaciones ============ -->
+    <section class="list">
+      <header class="list__head">
+        <div class="list__title-row">
+          <h1>Conversaciones</h1>
+          <div class="list__title-actions">
+            <button id="botToggle" class="bot-toggle" title="Prender / apagar el chatbot">
+              <svg viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.83 2.17-1.42 1.42A6.92 6.92 0 0 1 19 12a7 7 0 0 1-14 0 6.92 6.92 0 0 1 2.59-5.41L6.17 5.17A8.93 8.93 0 0 0 3 12a9 9 0 0 0 18 0 8.93 8.93 0 0 0-3.17-6.83z"/></svg>
+              <span id="botToggleLabel">Bot</span>
+            </button>
+            <span id="connBadge" class="conn conn--live" title="Estado de conexión">LIVE</span>
+          </div>
+        </div>
+        <div class="search">
+          <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+          <input id="searchInput" type="text" placeholder="Buscar contacto o mensaje" />
+        </div>
+        <div class="tabs">
+          <button class="tab tab--active" data-filter="all">Todas</button>
+          <button class="tab" data-filter="unread">No leídas</button>
+          <button class="tab" data-filter="starred">Destacadas</button>
+          <button class="tab tab--handoff" data-filter="handoff">Handoff<span class="tab__count" id="handoffCount"></span></button>
+        </div>
+      </header>
+      <div id="convList" class="list__body"><!-- conversaciones inyectadas --></div>
+    </section>
+
+    <!-- ============ PANEL 2: hilo de chat ============ -->
+    <section class="thread" id="thread">
+      <div class="thread__empty" id="threadEmpty">
+        <div class="thread__empty-icon">
+          <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/></svg>
+        </div>
+        <p>Selecciona una conversación para empezar</p>
+      </div>
+
+      <div class="thread__inner" id="threadInner" hidden>
+        <header class="thread__head">
+          <div class="thread__head-contact">
+            <div class="avatar" id="threadAvatar">--</div>
+            <div>
+              <div class="thread__name" id="threadName">--</div>
+              <div class="thread__sub"><span class="chan-badge" id="threadChan"></span> · <span id="threadPhone">--</span></div>
+            </div>
+          </div>
+          <div class="thread__head-actions">
+            <button id="btnStar" class="btn-icon" title="Destacar"><svg viewBox="0 0 24 24"><path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></button>
+            <button id="btnDelete" class="btn-icon btn-icon--danger" title="Eliminar conversación"><svg viewBox="0 0 24 24"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13H6zm4 2h1.5v9H10V9zm2.5 0H14v9h-1.5V9z"/></svg></button>
+          </div>
+        </header>
+
+        <div class="thread__messages" id="messages"><!-- mensajes inyectados --></div>
+
+        <div class="window-warn" id="windowWarn" hidden>
+          <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+          <span>Fuera de la ventana de 24 h. Solo puedes enviar una <strong>plantilla aprobada</strong> por Meta.</span>
+        </div>
+
+        <footer class="composer">
+          <div class="composer__tools">
+            <button class="btn-icon" id="btnTemplate" title="Plantillas">
+              <svg viewBox="0 0 24 24"><path d="M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h12v2H3v-2z"/></svg>
+            </button>
+            <button class="btn-icon" id="btnAttach" title="Adjuntar archivo">
+              <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6h-1.5z"/></svg>
+            </button>
+            <input type="file" id="fileInput" hidden />
+            <button class="btn-icon" id="btnMic" title="Grabar nota de voz">
+              <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
+            </button>
+            <button class="btn-icon" title="Emoji">
+              <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM12 17.5c-2.33 0-4.31-1.46-5.11-3.5h10.22c-.8 2.04-2.78 3.5-5.11 3.5z"/></svg>
+            </button>
+            <div class="composer__spacer"></div>
+            <span class="composer__hint">Enter para enviar · Shift+Enter salto de línea</span>
+          </div>
+          <div class="composer__row">
+            <textarea id="msgInput" rows="1" placeholder="Escribe un mensaje..."></textarea>
+            <button id="btnSend" class="btn-send" title="Enviar">
+              <svg viewBox="0 0 24 24"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+          </div>
+          <div class="composer__rec" id="recBar" hidden>
+            <span class="composer__rec-dot"></span>
+            <span class="composer__rec-time" id="recTime">0:00</span>
+            <span class="composer__rec-hint">Grabando nota de voz…</span>
+            <div class="composer__spacer"></div>
+            <button class="btn-icon composer__rec-cancel" id="recCancel" title="Cancelar">✕</button>
+            <button id="recSend" class="btn-send" title="Enviar nota de voz">
+              <svg viewBox="0 0 24 24"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+          </div>
+        </footer>
+      </div>
+    </section>
+
+    <!-- ============ PANEL 3: detalles de contacto ============ -->
+    <aside class="details" id="details" hidden>
+      <div class="details__head">
+        <div class="avatar avatar--lg" id="detAvatar">--</div>
+        <div class="details__name" id="detName">--</div>
+        <button id="convToggle" class="pill-toggle pill-toggle--on" title="Abrir / cerrar la conversación (cerrar detiene el bot)">
+          <span class="pill-toggle__dot"></span>
+          <span id="convToggleLabel">Abierta</span>
+        </button>
+        <div class="details__phone" id="detPhone">--</div>
+        <div class="details__quick">
+          <a id="detTel" class="qa" title="Llamar"><svg viewBox="0 0 24 24"><path d="M6.62 10.79a15.15 15.15 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.02-.24 11.36 11.36 0 0 0 3.57.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02l-2.2 2.2z"/></svg></a>
+          <a id="detMail" class="qa" title="Email"><svg viewBox="0 0 24 24"><path d="M20 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm0 4-8 5-8-5V6l8 5 8-5v2z"/></svg></a>
+        </div>
+      </div>
+
+      <div class="details__ghlnote" id="detGhlNote" hidden></div>
+
+      <div class="details__section">
+        <h3>Etiquetas</h3>
+        <div class="tags" id="detTags"></div>
+      </div>
+
+      <div class="details__section">
+        <h3>Información</h3>
+        <dl class="fields" id="detFields"></dl>
+      </div>
+
+      <div class="details__section" id="detOppsSection" hidden>
+        <h3>Oportunidades</h3>
+        <div id="detOpps"></div>
+      </div>
+
+      <div class="details__section" id="detCustomSection" hidden>
+        <h3>Campos personalizados</h3>
+        <dl class="fields" id="detCustom"></dl>
+      </div>
+
+    </aside>
+  </div>
+
+  <!-- ============ MODAL: Ajustes / Conexión n8n ============ -->
+  <div class="modal" id="settingsModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__card">
+      <header class="modal__head">
+        <h2>Conexión &amp; Ajustes</h2>
+        <button class="btn-icon" data-close>✕</button>
+      </header>
+      <div class="modal__body">
+        <div class="form-group">
+          <label>URL webhook · Enviar mensaje <small>(POST)</small></label>
+          <input type="url" id="cfgSendUrl" placeholder="https://tu-n8n/webhook/wa-send" />
+          <p class="hint">El dashboard hará POST con <code>{ to, type, text|template }</code>. En n8n, el nodo HTTP Request llama a la WhatsApp Cloud API.</p>
+        </div>
+
+        <div class="form-group">
+          <label>URL webhook · Obtener conversaciones <small>(GET)</small></label>
+          <input type="url" id="cfgConvUrl" placeholder="https://tu-n8n/webhook/wa-conversations" />
+        </div>
+
+        <div class="form-group">
+          <label>URL webhook · Obtener mensajes <small>(GET ?conversationId=)</small></label>
+          <input type="url" id="cfgMsgUrl" placeholder="https://tu-n8n/webhook/wa-messages" />
+        </div>
+
+        <div class="form-group">
+          <label>URL webhook · Eliminar conversación <small>(POST)</small></label>
+          <input type="url" id="cfgDeleteUrl" placeholder="https://tu-n8n/webhook/wa-delete-conversation" />
+        </div>
+
+        <div class="form-group">
+          <label>URL webhook · Datos GHL del contacto <small>(GET ?contactId=)</small></label>
+          <input type="url" id="cfgGhlUrl" placeholder="https://tu-n8n/webhook/wa-ghl-contact" />
+        </div>
+
+        <div class="form-group">
+          <label>URL webhook · Escribir campo GHL <small>(POST · cerrar→STOP)</small></label>
+          <input type="url" id="cfgGhlFieldUrl" placeholder="https://tu-n8n/webhook/wa-ghl-set-field" />
+        </div>
+
+        <div class="form-group">
+          <label>Sondeo de nuevos mensajes (polling)</label>
+          <select id="cfgPoll">
+            <option value="0">Desactivado</option>
+            <option value="5000">Cada 5 segundos</option>
+            <option value="10000" selected>Cada 10 segundos</option>
+            <option value="30000">Cada 30 segundos</option>
+          </select>
+          <p class="hint">Mientras n8n no haga push (WebSocket/SSE), el dashboard consulta nuevos mensajes en este intervalo.</p>
+        </div>
+
+        <div class="form-group">
+          <label>Token secreto (header <code>x-dashboard-token</code>) <small>opcional</small></label>
+          <input type="text" id="cfgToken" placeholder="para validar peticiones en n8n" />
+        </div>
+      </div>
+      <footer class="modal__foot">
+        <button class="btn-ghost" data-close>Cancelar</button>
+        <button class="btn-primary" id="btnSaveSettings">Guardar</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: Plantillas ============ -->
+  <div class="modal" id="templateModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__card modal__card--sm">
+      <header class="modal__head">
+        <h2>Plantillas de mensaje</h2>
+        <button class="btn-icon" data-close>✕</button>
+      </header>
+      <div class="modal__body" id="templateList"><!-- plantillas inyectadas --></div>
+    </div>
+  </div>
+
+  <!-- ============ VISOR DE MEDIA (lightbox) ============ -->
+  <div class="media-modal" id="mediaModal" hidden>
+    <div class="media-modal__backdrop" data-mclose></div>
+    <div class="media-modal__bar">
+      <span class="media-modal__name" id="mediaModalName"></span>
+      <div class="media-modal__actions">
+        <a class="media-modal__btn" id="mediaModalOpen" target="_blank" rel="noopener" title="Abrir en pestaña nueva">⤢</a>
+        <a class="media-modal__btn" id="mediaModalDl" title="Descargar">⤓</a>
+        <button class="media-modal__btn" data-mclose title="Cerrar (Esc)">✕</button>
+      </div>
+    </div>
+    <div class="media-modal__body" id="mediaModalBody"></div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- Scripts clásicos (compatibles con file://, sin paso de build).
+       ?v= = cache-busting: súbelo cuando cambies un .js para forzar recarga. -->
+  <script src="js/config.js?v=16"></script>
+  <script src="js/store.js?v=16"></script>
+  <script src="js/api.js?v=16"></script>
+  <script src="js/ui.js?v=16"></script>
+  <script src="js/app.js?v=16"></script>
+</body>
+</html>
