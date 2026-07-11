@@ -11,8 +11,8 @@
   function rangeParams() {
     const p = new URLSearchParams();
     if (customFrom || customTo) {
-      if (customFrom) p.set('from', customFrom);
-      if (customTo) p.set('to', customTo);
+      if (customFrom) p.set('from', new Date(customFrom).toISOString());
+      if (customTo) p.set('to', new Date(customTo).toISOString());
     } else {
       p.set('days', String(days));
     }
@@ -68,7 +68,7 @@
     const s = current; if (!s) return;
     const col = colors();
     let rlabel;
-    if (customFrom || customTo) rlabel = `${customFrom || '…'} → ${customTo || 'hoy'}`;
+    if (customFrom || customTo) rlabel = `${(customFrom || '…').replace('T', ' ')} → ${(customTo || 'hoy').replace('T', ' ')}`;
     else rlabel = (days === 'all' || Number(days) >= 100000) ? 'Todo el histórico' : `Últimos ${days} días`;
     $('#rangeLabel').textContent = rlabel + ` · ${s.range.tz}`;
 

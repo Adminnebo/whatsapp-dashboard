@@ -32,7 +32,8 @@ function rangeOf(req) {
   const qt = String(req.query.to || '').trim();
   if (qf || qt) {
     fromMs = qf ? Date.parse(qf) : minMs;
-    toMs = qt ? Date.parse(qt) + day : now;   // incluye todo el día 'to'
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(qt);       // solo fecha => incluye el día completo
+    toMs = qt ? Date.parse(qt) + (dateOnly ? day : 0) : now;
     if (isNaN(fromMs)) fromMs = minMs;
     if (isNaN(toMs)) toMs = now;
   } else {
