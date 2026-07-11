@@ -61,8 +61,8 @@ body { font-family: Inter, system-ui, sans-serif; background: var(--surface-0); 
 .wrap { max-width: 1560px; margin: 0 auto; padding: 30px clamp(20px, 3vw, 48px); display: flex; flex-direction: column; gap: 26px; }
 
 /* ===== KPIs ===== */
-.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 18px; }
-.kpi { background: var(--surface-1); border: 1px solid var(--border); border-radius: 16px; padding: 22px 22px 20px; }
+.kpis { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px; }
+.kpi { flex: 0 1 230px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 16px; padding: 22px 22px 20px; }
 .kpi__label { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; display: flex; align-items: center; gap: 7px; }
 .kpi__dot { width: 9px; height: 9px; border-radius: 50%; }
 .kpi__value { font-size: 42px; font-weight: 800; letter-spacing: -.02em; margin-top: 12px; line-height: 1; font-variant-numeric: tabular-nums; }
