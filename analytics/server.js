@@ -119,6 +119,8 @@ app.get('/api/stats', wrap(async (req, res) => {
     runs: byModel.reduce((a, m) => a + m.runs, 0),
     byModel
   };
+  const sentOut = Number(k.sent) || 0;
+  const chargedTotal = Number(k.charged) || 0;
   const hourMap = {}; byHour.rows.forEach(x => { hourMap[x.hour] = x; });
   const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, sent: Number((hourMap[h] || {}).sent) || 0, received: Number((hourMap[h] || {}).received) || 0 }));
 
@@ -143,7 +145,7 @@ app.get('/api/stats', wrap(async (req, res) => {
       samples: Number(e.n) || 0
     },
     aiCost,
-    billing: { perOut: MSG_COST_OUT, currency: COST_CCY, total: Number(k.charged) || 0 },
+    billing: { perOut: sentOut ? chargedTotal / sentOut : MSG_COST_OUT, currency: COST_CCY, total: chargedTotal },
     byDay: byDay.rows.map(x => ({ day: x.day, sent: Number(x.sent) || 0, received: Number(x.received) || 0 })),
     byHour: hours,
     byType: byType.rows.map(x => ({ type: x.type, n: x.n })),
