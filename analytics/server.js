@@ -72,6 +72,7 @@ app.get('/api/stats', wrap(async (req, res) => {
   const [kpi, rt, byDay, byHour, byType, execT, aiRows, quotes] = await Promise.all([
     q(`SELECT count(*) FILTER (WHERE direction='out') AS sent,
               count(*) FILTER (WHERE direction='in')  AS received,
+              COALESCE(SUM(charged_usd),0) AS charged,
               max(created_at) FILTER (WHERE direction='out') AS last_sent_at,
               count(DISTINCT conversation_id) AS active_convs
        FROM messages WHERE created_at >= $1`, [from]),
@@ -142,7 +143,7 @@ app.get('/api/stats', wrap(async (req, res) => {
       samples: Number(e.n) || 0
     },
     aiCost,
-    billing: { perOut: MSG_COST_OUT, currency: COST_CCY, total: (Number(k.sent) || 0) * MSG_COST_OUT },
+    billing: { perOut: MSG_COST_OUT, currency: COST_CCY, total: Number(k.charged) || 0 },
     byDay: byDay.rows.map(x => ({ day: x.day, sent: Number(x.sent) || 0, received: Number(x.received) || 0 })),
     byHour: hours,
     byType: byType.rows.map(x => ({ type: x.type, n: x.n })),
@@ -175,14 +176,14 @@ app.get('/api/messages', wrap(async (req, res) => {
 
   const [rows, totalR] = await Promise.all([
     q(`WITH seq AS (
-         SELECT id, conversation_id, direction, type, text, status, created_at, execution_ms, model, cost_usd,
+         SELECT id, conversation_id, direction, type, text, status, created_at, execution_ms, model, cost_usd, charged_usd,
                 LAG(direction)  OVER w AS prev_dir,
                 LAG(text)       OVER w AS prev_text,
                 LAG(type)       OVER w AS prev_type,
                 LAG(created_at) OVER w AS prev_at
          FROM messages WHERE created_at >= $1
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at, id))
-       SELECT s.id, s.conversation_id, s.created_at AS out_at, s.status, s.execution_ms, s.model, s.cost_usd,
+       SELECT s.id, s.conversation_id, s.created_at AS out_at, s.status, s.execution_ms, s.model, s.cost_usd, s.charged_usd,
               s.text AS out_text, s.type AS out_type,
               s.prev_text AS in_text, s.prev_type AS in_type, s.prev_at AS in_at,
               EXTRACT(EPOCH FROM (s.created_at - s.prev_at)) AS response_secs,
@@ -226,7 +227,7 @@ app.get('/api/messages', wrap(async (req, res) => {
       execSecs: m.execution_ms != null ? Number(m.execution_ms) : null,
       model: m.model || null,
       costUsd: m.cost_usd != null ? Number(m.cost_usd) : null,
-      cost: MSG_COST_OUT
+      cost: m.charged_usd != null ? Number(m.charged_usd) : MSG_COST_OUT
     }))
   });
 }));
