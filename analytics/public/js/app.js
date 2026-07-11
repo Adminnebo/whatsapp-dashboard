@@ -97,17 +97,26 @@
     const ai = s.aiCost || {};
     const bl = s.billing || {};
     const q = s.quotes || {};
-    $('#kpis').innerHTML = [
+    const kpis = [
       kpi('Enviados', col.sent, fmtNum(s.kpi.sent), 'mensajes salientes'),
       kpi('Recibidos', col.received, fmtNum(s.kpi.received), 'mensajes entrantes'),
-      kpi('Tiempo de respuesta', '', fmtSecs(rt.medianSecs), `mediana · prom ${fmtSecs(rt.avgSecs)} · p90 ${fmtSecs(rt.p90Secs)}`),
-      kpi('Coste prom/mensaje', '', canCost ? (ai.runs ? fmtUsd(ai.totalUsd / ai.runs) : '—') : '🔒', canCost ? (ai.runs ? `promedio IA sobre ${fmtNum(ai.runs)} runs` : 'sin datos aún') : 'solo super admin', !canCost || !ai.runs),
-      kpi('Consumo IA', '', canCost ? (ai.runs ? fmtUsd(ai.totalUsd) : '—') : '🔒', canCost ? (ai.runs ? `${fmtNum(ai.runs)} runs · ${(ai.byModel || []).map(m => `${m.model}: ${fmtUsd(m.usd)}`).join(' · ')}` : 'sin datos aún') : 'solo super admin', !canCost || !ai.runs),
+      kpi('Tiempo de respuesta', '', fmtSecs(rt.medianSecs), `mediana · prom ${fmtSecs(rt.avgSecs)} · p90 ${fmtSecs(rt.p90Secs)}`)
+    ];
+    if (canCost) {   // costes reales solo super_admin; si no, se ocultan (no aparecen)
+      kpis.push(
+        kpi('Coste prom/mensaje', '', ai.runs ? fmtUsd(ai.totalUsd / ai.runs) : '—', ai.runs ? `promedio IA sobre ${fmtNum(ai.runs)} runs` : 'sin datos aún', !ai.runs),
+        kpi('Consumo IA', '', ai.runs ? fmtUsd(ai.totalUsd) : '—', ai.runs ? `${fmtNum(ai.runs)} runs · ${(ai.byModel || []).map(m => `${m.model}: ${fmtUsd(m.usd)}`).join(' · ')}` : 'sin datos aún', !ai.runs)
+      );
+    }
+    kpis.push(
       kpi('Cobrado al cliente', '', bl.total != null ? fmtUsd(bl.total, 2) : '—', `${fmtNum(s.kpi.sent)} msg × ${fmtUsd(bl.perOut || 0, 2)}`),
       kpi('Último enviado', '', fmtDateTime(s.kpi.lastSentAt), relTime(s.kpi.lastSentAt), false, 'kpi--sm'),
       kpi('Conversaciones', '', fmtNum(s.kpi.activeConversations), 'con actividad en el rango'),
       kpi('Cotizaciones', '', q.available ? fmtNum(q.count) : 'Pendiente', q.available ? (q.amount ? 'RD$ ' + fmtNum(Math.round(q.amount)) + ' cotizado' : 'enviadas en el rango') : 'configurar MSSQL', !q.available)
-    ].join('');
+    );
+    const kpisEl = $('#kpis');
+    kpisEl.innerHTML = kpis.join('');
+    kpisEl.className = 'kpis' + (canCost ? '' : ' kpis--7');   // 9 KPIs (5/4) vs 7 (4/3)
 
     // Legends
     const leg = `<span><i style="background:${col.received}"></i>Recibidos</span><span><i style="background:${col.sent}"></i>Enviados</span>`;
@@ -145,6 +154,7 @@
 
   function renderMessages() {
     const d = msgData; if (!d) return;
+    const tbl = $('#msgsTable'); if (tbl) tbl.classList.toggle('msgs--nocost', d.canSeeCost === false); // oculta col Coste IA
     const body = $('#msgsBody');
     if (!d.items.length) {
       body.innerHTML = `<tr><td colspan="9" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
@@ -156,7 +166,7 @@
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
         <td class="num">${m.execSecs != null ? fmtExec(m.execSecs) : '<span class="dim">—</span>'}</td>
         <td class="cap">${m.model ? escapeHtml(m.model) : '<span class="dim">—</span>'}</td>
-        <td class="num">${m.costUsd != null ? fmtUsd(m.costUsd) : (d.canSeeCost === false ? '<span class="dim">🔒</span>' : '<span class="dim">—</span>')}</td>
+        <td class="num">${m.costUsd != null ? fmtUsd(m.costUsd) : '<span class="dim">—</span>'}</td>
         <td class="num">${fmtCost(m.cost, d.cost.currency)}</td>
         <td class="cap dim">${escapeHtml(m.status || '—')}</td>
       </tr>`).join('');
