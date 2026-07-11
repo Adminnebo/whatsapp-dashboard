@@ -201,26 +201,31 @@ app.get('/api/bot-status', wrap(async (req, res) => {
   const contactId = String(req.query.contactId || '').trim();
   const botActive = await getFlag();
 
-  let handoff = false, conversationOpen = true, lastInboundAt = null;
+  let handoff = false, conversationOpen = true, botStatus = '', lastInboundAt = null;
   if (contactId) {
+    // ventana 24h de WhatsApp (desde el último entrante en la DB)
     const r = await q(
-      `SELECT conv.status, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
+      `SELECT EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
        FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
        WHERE c.ghl_contact_id = $1 LIMIT 1`, [contactId]);
-    if (r.rows.length) {
-      conversationOpen = String(r.rows[0].status || 'open') === 'open';
-      lastInboundAt = r.rows[0].last_inbound != null ? Number(r.rows[0].last_inbound) : null;
-    }
+    if (r.rows.length && r.rows[0].last_inbound != null) lastInboundAt = Number(r.rows[0].last_inbound);
+
+    // GHL: tags (handoff) + custom field bot_status (botón Abierta/Cerrada a mano).
+    // bot_status = 'STOP' => conversación cerrada (bot detenido); vacío => abierta.
     try {
       const { json } = await ghl('/contacts/' + encodeURIComponent(contactId));
-      const tags = (json && json.contact && json.contact.tags) || [];
+      const contact = (json && json.contact) || {};
+      const tags = contact.tags || [];
       handoff = tags.map(t => String(t).toLowerCase()).includes(String(HANDOFF_TAG).toLowerCase());
-    } catch (_) { /* si GHL falla, no bloquea al bot por handoff */ }
+      const cf = (contact.customFields || []).find(f => f && f.id === BOT_STATUS_FIELD);
+      botStatus = cf && cf.value != null ? String(cf.value) : '';
+      conversationOpen = botStatus.toUpperCase() !== 'STOP';
+    } catch (_) { /* si GHL falla, no bloquea al bot */ }
   }
 
   const withinWindow = lastInboundAt != null ? (Date.now() - lastInboundAt) < 24 * 3600 * 1000 : true;
   const shouldReply = botActive && !handoff && conversationOpen;
-  res.json({ ok: true, contactId: contactId || null, botActive, handoff, conversationOpen, lastInboundAt, withinWindow, shouldReply });
+  res.json({ ok: true, contactId: contactId || null, botActive, handoff, conversationOpen, botStatus, lastInboundAt, withinWindow, shouldReply });
 }));
 
 // ---- GHL ----
