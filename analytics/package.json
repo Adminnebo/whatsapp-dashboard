@@ -1,0 +1,17 @@
+{
+  "name": "whatsapp-analytics",
+  "version": "1.0.0",
+  "description": "Dashboard de analítica de conversaciones WhatsApp (Express + Postgres): mensajes enviados/recibidos, horas pico, tiempo de respuesta, último mensaje, cotizaciones.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mssql": "^12.7.0",
+    "pg": "^8.11.5"
+  }
+}
