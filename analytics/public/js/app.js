@@ -103,13 +103,12 @@
     const d = msgData; if (!d) return;
     const body = $('#msgsBody');
     if (!d.items.length) {
-      body.innerHTML = `<tr><td colspan="7" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="6" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
     } else {
       body.innerHTML = d.items.map(m => `<tr>
         <td class="nowrap">${fmtDateTime(m.inAt || m.outAt)}</td>
         <td class="msgs__in"><span class="msgs__text">${msgCell(m.inText, m.inType)}</span></td>
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
-        <td class="num">${m.responseSecs != null ? fmtSecs(m.responseSecs) : '<span class="dim">—</span>'}</td>
         <td class="num">${m.execSecs != null ? fmtExec(m.execSecs) : '<span class="dim">—</span>'}</td>
         <td class="num">${fmtCost(m.cost, d.cost.currency)}</td>
         <td class="cap dim">${escapeHtml(m.status || '—')}</td>
@@ -129,7 +128,7 @@
     const rateNote = d.cost.out
       ? `Coste por respuesta a tarifa ${fmtCost(d.cost.out, d.cost.currency)}.`
       : 'Coste sin tarifa configurada (MSG_COST_OUT).';
-    $('#msgsNote').textContent = rateNote + ' Cada fila empareja un mensaje entrante del cliente con la respuesta del bot; el tiempo de respuesta es la diferencia entre ambos.';
+    $('#msgsNote').textContent = rateNote + ' Cada fila empareja un mensaje entrante del cliente con la respuesta del bot; "Ejecución" es el tiempo que tardó el bot en generar la respuesta (por run).';
   }
 
   async function loadMessages() {
@@ -139,7 +138,7 @@
       msgData = await res.json();
       renderMessages();
     } catch (e) {
-      $('#msgsBody').innerHTML = `<tr><td colspan="7" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
+      $('#msgsBody').innerHTML = `<tr><td colspan="6" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
     }
   }
 
