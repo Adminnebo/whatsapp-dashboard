@@ -90,6 +90,7 @@ async function quotesStat(from, to) {
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/auth/config', (_req, res) => res.json({ supabaseUrl: SB_URL, supabaseAnonKey: SB_ANON, configured: authCfg }));
+app.use('/api/auth', require('./authUsers')); // /api/auth/me, /users (solo admin/super_admin)
 
 app.get('/api/stats', optionalAuth, wrap(async (req, res) => {
   const { from, to } = rangeOf(req);

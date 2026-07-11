@@ -563,6 +563,11 @@
       if (Auth.configured) {
         const av = document.querySelector('.rail__avatar');
         if (av) { av.title = 'Cerrar sesión'; av.style.cursor = 'pointer'; av.addEventListener('click', () => Auth.signOut()); }
+        try {
+          const me = await Auth.me();
+          const role = me && me.profile ? me.profile.role : null;
+          if (['admin', 'super_admin'].includes(role)) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
+        } catch (_) {}
       }
     }
     App.init();

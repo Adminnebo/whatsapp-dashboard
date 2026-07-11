@@ -39,4 +39,4 @@ async function optionalAuth(req, _res, next) {
   next();
 }
 
-module.exports = { configured, optionalAuth, URL, ANON };
+module.exports = { configured, optionalAuth, URL, ANON, SERVICE, roleForToken };

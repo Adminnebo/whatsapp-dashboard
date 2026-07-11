@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Usuarios · Analítica</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Inter, system-ui, sans-serif; background: #0f1115; color: #f4f4f1; padding: 24px; }
+    .wrap { max-width: 1000px; margin: 0 auto; }
+    .top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+    .top h1 { font-size: 20px; font-weight: 800; }
+    .top a { font-size: 13px; font-weight: 600; color: #b7bcc7; text-decoration: none; padding: 8px 12px; border: 1px solid #2a2d36; border-radius: 9px; background: #1a1c22; }
+    .card { background: #1a1c22; border: 1px solid #2a2d36; border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+    .card h2 { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: end; }
+    label { display: block; font-size: 12px; font-weight: 600; color: #8b8f9a; margin-bottom: 5px; }
+    input, select { width: 100%; padding: 9px 11px; font-size: 13.5px; border: 1px solid #2a2d36; border-radius: 8px; background: #14161b; color: #f4f4f1; }
+    input:focus, select:focus { outline: none; border-color: #4c8bf5; }
+    .btn { font-size: 13px; font-weight: 600; color: #f4f4f1; background: #1a1c22; border: 1px solid #2a2d36; border-radius: 8px; padding: 9px 13px; cursor: pointer; }
+    .btn:hover { background: #23262f; }
+    .btn--primary { color: #fff; background: #3574e0; border-color: #3574e0; }
+    .btn--danger { color: #f87171; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; color: #8b8f9a; padding: 10px 12px; border-bottom: 1px solid #2a2d36; }
+    td { padding: 11px 12px; border-bottom: 1px solid #23262f; }
+    .pill { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+    .pill--super_admin { background: rgba(235,104,52,.2); color: #f0996b; }
+    .pill--admin { background: rgba(53,116,224,.2); color: #7aa7f5; }
+    .pill--agent { background: rgba(255,255,255,.08); color: #b7bcc7; }
+    .msg { font-size: 13px; min-height: 18px; margin-top: 10px; }
+    .msg--err { color: #f87171; } .msg--ok { color: #34d399; }
+    .row-actions { display: flex; gap: 8px; }
+    .dim { color: #8b8f9a; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top"><h1>👥 Usuarios</h1><a href="/">← Volver a la analítica</a></div>
+
+    <div class="card">
+      <h2>Crear usuario</h2>
+      <div class="grid">
+        <div><label>Correo</label><input type="email" id="nEmail" placeholder="usuario@empresa.com" /></div>
+        <div><label>Contraseña</label><input type="text" id="nPass" placeholder="mínimo 6" /></div>
+        <div><label>Nombre</label><input type="text" id="nName" placeholder="opcional" /></div>
+        <div><label>Rol</label><select id="nRole"><option value="agent">Agente</option><option value="admin">Admin</option></select></div>
+        <div><button class="btn btn--primary" id="createBtn">Crear</button></div>
+      </div>
+      <div class="msg" id="createMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Usuarios (<span id="count">…</span>)</h2>
+      <table>
+        <thead><tr><th>Correo</th><th>Nombre</th><th>Rol</th><th>Último acceso</th><th></th></tr></thead>
+        <tbody id="tbody"><tr><td colspan="5" class="dim">Cargando…</td></tr></tbody>
+      </table>
+      <div class="msg" id="listMsg"></div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    const $ = s => document.querySelector(s);
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const fmt = iso => { if (!iso) return '—'; try { return new Date(iso).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (_) { return '—'; } };
+    const roleLabel = r => r === 'super_admin' ? 'Super admin' : r === 'admin' ? 'Admin' : 'Agente';
+
+    async function guard() {
+      const s = await Auth.requireSession(); if (!s) return false;
+      const me = await (await Auth.fetch('/api/auth/me')).json().catch(() => ({}));
+      if (!me || !['admin', 'super_admin'].includes(me.role)) {
+        $('.wrap').innerHTML = '<div class="card"><h2>Sin acceso</h2><p class="dim">Solo administradores.</p><p style="margin-top:12px"><a href="/" style="color:#7aa7f5">← Volver</a></p></div>';
+        return false;
+      }
+      return true;
+    }
+
+    async function loadUsers() {
+      const r = await Auth.fetch('/api/auth/users');
+      if (!r.ok) { $('#listMsg').className = 'msg msg--err'; $('#listMsg').textContent = 'Error al cargar'; return; }
+      const { users } = await r.json();
+      $('#count').textContent = users.length;
+      $('#tbody').innerHTML = users.map(u => `<tr data-id="${u.id}">
+        <td>${esc(u.email)}</td>
+        <td>${esc(u.fullName || '—')}</td>
+        <td><span class="pill pill--${u.role}">${roleLabel(u.role)}</span></td>
+        <td class="dim">${fmt(u.lastSignInAt)}</td>
+        <td class="row-actions">
+          <button class="btn" data-act="edit">Editar</button>
+          <button class="btn btn--danger" data-act="del">Eliminar</button>
+        </td></tr>`).join('') || '<tr><td colspan="5" class="dim">Sin usuarios.</td></tr>';
+    }
+
+    $('#createBtn').addEventListener('click', async () => {
+      const body = { email: $('#nEmail').value.trim(), password: $('#nPass').value, fullName: $('#nName').value.trim() || null, role: $('#nRole').value };
+      const m = $('#createMsg');
+      const r = await Auth.fetch('/api/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { m.className = 'msg msg--ok'; m.textContent = 'Usuario creado.'; $('#nEmail').value = $('#nPass').value = $('#nName').value = ''; loadUsers(); }
+      else { m.className = 'msg msg--err'; m.textContent = d.error || 'Error'; }
+    });
+
+    $('#tbody').addEventListener('click', async (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      const id = b.closest('tr').dataset.id;
+      if (b.dataset.act === 'del') {
+        if (!confirm('¿Eliminar este usuario?')) return;
+        const r = await Auth.fetch('/api/auth/users/' + id, { method: 'DELETE' });
+        if (r.ok) loadUsers();
+      } else {
+        const patch = {};
+        const role = prompt('Rol (admin / agent):', '');
+        if (role && ['admin', 'agent'].includes(role.trim())) patch.role = role.trim();
+        const pass = prompt('Nueva contraseña (vacío = no cambiar):', '');
+        if (pass) patch.password = pass;
+        if (!Object.keys(patch).length) return;
+        const r = await Auth.fetch('/api/auth/users/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+        if (r.ok) loadUsers(); else { const d = await r.json().catch(() => ({})); alert(d.error || 'Error'); }
+      }
+    });
+
+    (async () => { if (await guard()) loadUsers(); })();
+  </script>
+</body>
+</html>

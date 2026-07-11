@@ -69,6 +69,7 @@
   async function setupAuth() {
     if (!window.Auth) return;
     const btn = document.querySelector('#btnAuth');
+    const usersBtn = document.querySelector('#btnUsers');
     try { await Auth.session(); } catch (_) {}      // inicializa
     if (!Auth.configured) { if (btn) btn.hidden = true; return; }
     if (!btn) return;
@@ -76,6 +77,9 @@
     const s = await Auth.session();
     if (s) { btn.textContent = 'Salir'; btn.title = s.user.email; btn.onclick = () => Auth.signOut(); }
     else { btn.textContent = 'Entrar'; btn.title = 'Iniciar sesión'; btn.onclick = () => (location.href = '/login.html'); }
+    if (s && usersBtn) {
+      try { const me = await (await Auth.fetch('/api/auth/me')).json(); if (['admin', 'super_admin'].includes(me.role)) usersBtn.hidden = false; } catch (_) {}
+    }
   }
 
   function render() {
