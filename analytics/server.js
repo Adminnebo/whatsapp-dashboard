@@ -11,6 +11,7 @@ const { q } = require('./db');
 const { configured: authCfg, optionalAuth, URL: SB_URL, ANON: SB_ANON } = require('./analyticsAuth');
 
 const app = express();
+app.use(express.json({ limit: '2mb' }));   // necesario para POST/PATCH (crear usuarios)
 const PORT = process.env.PORT || 8080;
 const TZ = process.env.TZ_DISPLAY || 'America/Santo_Domingo';
 
