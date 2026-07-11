@@ -82,7 +82,7 @@
       kpi('Enviados', col.sent, fmtNum(s.kpi.sent), 'mensajes salientes'),
       kpi('Recibidos', col.received, fmtNum(s.kpi.received), 'mensajes entrantes'),
       kpi('Tiempo de respuesta', '', fmtSecs(rt.medianSecs), `mediana · prom ${fmtSecs(rt.avgSecs)} · p90 ${fmtSecs(rt.p90Secs)}`),
-      kpi('Tiempo de ejecución', '', ex.samples ? fmtExec(ex.medianSecs) : '—', ex.samples ? `mediana · prom ${fmtExec(ex.avgSecs)} · p90 ${fmtExec(ex.p90Secs)} · ${fmtNum(ex.samples)} runs` : 'sin datos aún', !ex.samples),
+      kpi('Coste prom/mensaje', '', ai.runs ? fmtUsd(ai.totalUsd / ai.runs) : '—', ai.runs ? `promedio IA sobre ${fmtNum(ai.runs)} runs` : 'sin datos aún', !ai.runs),
       kpi('Consumo IA', '', ai.runs ? fmtUsd(ai.totalUsd) : '—', ai.runs ? `${fmtNum(ai.runs)} runs · ${(ai.byModel || []).map(m => `${m.model}: ${fmtUsd(m.usd)}`).join(' · ')}` : 'sin datos aún', !ai.runs),
       kpi('Cobrado al cliente', '', bl.total != null ? fmtUsd(bl.total, 2) : '—', `${fmtNum(s.kpi.sent)} msg × ${fmtUsd(bl.perOut || 0, 2)}`),
       kpi('Último enviado', '', fmtDateTime(s.kpi.lastSentAt), relTime(s.kpi.lastSentAt), false, 'kpi--sm'),
