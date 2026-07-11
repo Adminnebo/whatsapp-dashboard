@@ -49,6 +49,19 @@ async function requireAdmin(req, res, next) {
   } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
 }
 
+// No bloquea: si viene un token válido, adjunta req.user + req.role; si no, sigue.
+// Útil para contenido opcional según el rol (p.ej. mostrar costes solo a super_admin).
+async function optionalAuth(req, _res, next) {
+  try {
+    const token = tokenFrom(req);
+    if (token) {
+      const user = await verify(token);
+      if (user) { req.user = user; const prof = await getProfile(user.id); req.role = prof ? prof.role : null; }
+    }
+  } catch (_) { /* nunca bloquea */ }
+  next();
+}
+
 // Solo super_admin (p.ej. para ver costes reales de IA). Se asigna solo por API.
 async function requireSuperAdmin(req, res, next) {
   try {
@@ -60,4 +73,4 @@ async function requireSuperAdmin(req, res, next) {
   } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
 }
 
-module.exports = { requireAuth, requireAdmin, requireSuperAdmin, verify };
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, optionalAuth, verify };

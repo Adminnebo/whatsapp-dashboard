@@ -64,9 +64,24 @@
       <div class="kpi__sub">${sub || ''}</div></div>`;
   }
 
+  function authHeaders() { return (window.Auth && Auth.currentToken) ? { Authorization: 'Bearer ' + Auth.currentToken } : {}; }
+
+  async function setupAuth() {
+    if (!window.Auth) return;
+    const btn = document.querySelector('#btnAuth');
+    try { await Auth.session(); } catch (_) {}      // inicializa
+    if (!Auth.configured) { if (btn) btn.hidden = true; return; }
+    if (!btn) return;
+    btn.hidden = false;
+    const s = await Auth.session();
+    if (s) { btn.textContent = 'Salir'; btn.title = s.user.email; btn.onclick = () => Auth.signOut(); }
+    else { btn.textContent = 'Entrar'; btn.title = 'Iniciar sesión'; btn.onclick = () => (location.href = '/login.html'); }
+  }
+
   function render() {
     const s = current; if (!s) return;
     const col = colors();
+    const canCost = s.canSeeCost !== false;   // sin auth (undefined) => visible
     let rlabel;
     if (customFrom || customTo) rlabel = `${(customFrom || '…').replace('T', ' ')} → ${(customTo || 'hoy').replace('T', ' ')}`;
     else rlabel = (days === 'all' || Number(days) >= 100000) ? 'Todo el histórico' : `Últimos ${days} días`;
@@ -82,8 +97,8 @@
       kpi('Enviados', col.sent, fmtNum(s.kpi.sent), 'mensajes salientes'),
       kpi('Recibidos', col.received, fmtNum(s.kpi.received), 'mensajes entrantes'),
       kpi('Tiempo de respuesta', '', fmtSecs(rt.medianSecs), `mediana · prom ${fmtSecs(rt.avgSecs)} · p90 ${fmtSecs(rt.p90Secs)}`),
-      kpi('Coste prom/mensaje', '', ai.runs ? fmtUsd(ai.totalUsd / ai.runs) : '—', ai.runs ? `promedio IA sobre ${fmtNum(ai.runs)} runs` : 'sin datos aún', !ai.runs),
-      kpi('Consumo IA', '', ai.runs ? fmtUsd(ai.totalUsd) : '—', ai.runs ? `${fmtNum(ai.runs)} runs · ${(ai.byModel || []).map(m => `${m.model}: ${fmtUsd(m.usd)}`).join(' · ')}` : 'sin datos aún', !ai.runs),
+      kpi('Coste prom/mensaje', '', canCost ? (ai.runs ? fmtUsd(ai.totalUsd / ai.runs) : '—') : '🔒', canCost ? (ai.runs ? `promedio IA sobre ${fmtNum(ai.runs)} runs` : 'sin datos aún') : 'solo super admin', !canCost || !ai.runs),
+      kpi('Consumo IA', '', canCost ? (ai.runs ? fmtUsd(ai.totalUsd) : '—') : '🔒', canCost ? (ai.runs ? `${fmtNum(ai.runs)} runs · ${(ai.byModel || []).map(m => `${m.model}: ${fmtUsd(m.usd)}`).join(' · ')}` : 'sin datos aún') : 'solo super admin', !canCost || !ai.runs),
       kpi('Cobrado al cliente', '', bl.total != null ? fmtUsd(bl.total, 2) : '—', `${fmtNum(s.kpi.sent)} msg × ${fmtUsd(bl.perOut || 0, 2)}`),
       kpi('Último enviado', '', fmtDateTime(s.kpi.lastSentAt), relTime(s.kpi.lastSentAt), false, 'kpi--sm'),
       kpi('Conversaciones', '', fmtNum(s.kpi.activeConversations), 'con actividad en el rango'),
@@ -137,7 +152,7 @@
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
         <td class="num">${m.execSecs != null ? fmtExec(m.execSecs) : '<span class="dim">—</span>'}</td>
         <td class="cap">${m.model ? escapeHtml(m.model) : '<span class="dim">—</span>'}</td>
-        <td class="num">${m.costUsd != null ? fmtUsd(m.costUsd) : '<span class="dim">—</span>'}</td>
+        <td class="num">${m.costUsd != null ? fmtUsd(m.costUsd) : (d.canSeeCost === false ? '<span class="dim">🔒</span>' : '<span class="dim">—</span>')}</td>
         <td class="num">${fmtCost(m.cost, d.cost.currency)}</td>
         <td class="cap dim">${escapeHtml(m.status || '—')}</td>
       </tr>`).join('');
@@ -165,7 +180,7 @@
       params.set('page', String(msgPage));
       params.set('limit', '50');
       if (msgSearch) params.set('search', msgSearch);
-      const res = await fetch('/api/messages?' + params.toString());
+      const res = await fetch('/api/messages?' + params.toString(), { headers: authHeaders() });
       msgData = await res.json();
       renderMessages();
     } catch (e) {
@@ -175,7 +190,7 @@
 
   async function load() {
     try {
-      const res = await fetch('/api/stats?' + rangeParams().toString());
+      const res = await fetch('/api/stats?' + rangeParams().toString(), { headers: authHeaders() });
       current = await res.json();
       render();
     } catch (e) { $('#kpis').innerHTML = `<div class="kpi kpi--muted"><div class="kpi__value">Error</div><div class="kpi__sub">${e.message}</div></div>`; }
@@ -239,7 +254,7 @@
       render(); // re-pinta con los colores del tema
       renderMessages();
     });
-    load(); loadMessages();
+    setupAuth().then(() => { load(); loadMessages(); });
     setInterval(() => { load(); loadMessages(); }, 60000); // refresco cada minuto
   }
   document.addEventListener('DOMContentLoaded', init);

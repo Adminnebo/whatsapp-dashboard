@@ -8,6 +8,7 @@ const path = require('path');
 const express = require('express');
 const sql = require('mssql');
 const { q } = require('./db');
+const { configured: authCfg, optionalAuth, URL: SB_URL, ANON: SB_ANON } = require('./analyticsAuth');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -88,9 +89,11 @@ async function quotesStat(from, to) {
 }
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/auth/config', (_req, res) => res.json({ supabaseUrl: SB_URL, supabaseAnonKey: SB_ANON, configured: authCfg }));
 
-app.get('/api/stats', wrap(async (req, res) => {
+app.get('/api/stats', optionalAuth, wrap(async (req, res) => {
   const { from, to } = rangeOf(req);
+  const canSeeCost = !authCfg || req.role === 'super_admin'; // costes reales solo super_admin
 
   const [kpi, rt, byDay, byHour, byType, execT, aiRows, quotes] = await Promise.all([
     q(`SELECT count(*) FILTER (WHERE direction='out') AS sent,
@@ -167,7 +170,8 @@ app.get('/api/stats', wrap(async (req, res) => {
       p90Secs: e.p90_secs != null ? Number(e.p90_secs) : null,
       samples: Number(e.n) || 0
     },
-    aiCost,
+    aiCost: canSeeCost ? aiCost : null,
+    canSeeCost,
     billing: { perOut: sentOut ? chargedTotal / sentOut : MSG_COST_OUT, currency: COST_CCY, total: chargedTotal },
     byDay: byDay.rows.map(x => ({ day: x.day, sent: Number(x.sent) || 0, received: Number(x.received) || 0 })),
     byHour: hours,
@@ -180,8 +184,9 @@ app.get('/api/stats', wrap(async (req, res) => {
 // con el tiempo que tardó la respuesta y el coste del saliente. Un par = un
 // saliente cuyo mensaje inmediatamente anterior en la conversación fue entrante.
 const trunc = (t, n) => (t && t.length > n ? t.slice(0, n) + '…' : (t || ''));
-app.get('/api/messages', wrap(async (req, res) => {
+app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
   const { from, to } = rangeOf(req);
+  const canSeeCost = !authCfg || req.role === 'super_admin';
 
   const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 50));
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -230,7 +235,7 @@ app.get('/api/messages', wrap(async (req, res) => {
 
   const total = totalR.rows[0] ? totalR.rows[0].n : 0;
   res.json({
-    page, limit, total,
+    page, limit, total, canSeeCost,
     cost: { out: MSG_COST_OUT, in: MSG_COST_IN, currency: COST_CCY },
     items: rows.rows.map(m => ({
       id: String(m.id),
@@ -247,7 +252,7 @@ app.get('/api/messages', wrap(async (req, res) => {
       responseSecs: m.response_secs != null ? Number(m.response_secs) : null,
       execSecs: m.execution_ms != null ? Number(m.execution_ms) : null,
       model: m.model || null,
-      costUsd: m.cost_usd != null ? Number(m.cost_usd) : null,
+      costUsd: (canSeeCost && m.cost_usd != null) ? Number(m.cost_usd) : null,
       cost: m.charged_usd != null ? Number(m.charged_usd) : MSG_COST_OUT
     }))
   });
