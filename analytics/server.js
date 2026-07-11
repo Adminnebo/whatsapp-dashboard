@@ -204,14 +204,14 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
 
   const [rows, totalR] = await Promise.all([
     q(`WITH seq AS (
-         SELECT id, conversation_id, direction, type, text, status, created_at, execution_ms, model, cost_usd, charged_usd,
+         SELECT id, conversation_id, direction, type, text, status, created_at, execution_ms, model, cost_usd, charged_usd, sent_by,
                 LAG(direction)  OVER w AS prev_dir,
                 LAG(text)       OVER w AS prev_text,
                 LAG(type)       OVER w AS prev_type,
                 LAG(created_at) OVER w AS prev_at
          FROM messages WHERE created_at >= $1 AND created_at < $2
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at, id))
-       SELECT s.id, s.conversation_id, s.created_at AS out_at, s.status, s.execution_ms, s.model, s.cost_usd, s.charged_usd,
+       SELECT s.id, s.conversation_id, s.created_at AS out_at, s.status, s.execution_ms, s.model, s.cost_usd, s.charged_usd, s.sent_by,
               s.text AS out_text, s.type AS out_type,
               s.prev_text AS in_text, s.prev_type AS in_type, s.prev_at AS in_at,
               EXTRACT(EPOCH FROM (s.created_at - s.prev_at)) AS response_secs,
@@ -254,6 +254,7 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
       responseSecs: m.response_secs != null ? Number(m.response_secs) : null,
       execSecs: m.execution_ms != null ? Number(m.execution_ms) : null,
       model: m.model || null,
+      sentBy: m.sent_by || null,
       costUsd: (canSeeCost && m.cost_usd != null) ? Number(m.cost_usd) : null,
       cost: m.charged_usd != null ? Number(m.charged_usd) : MSG_COST_OUT
     }))

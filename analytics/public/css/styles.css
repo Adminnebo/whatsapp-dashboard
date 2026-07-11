@@ -74,7 +74,8 @@ body { font-family: Inter, system-ui, sans-serif; background: var(--surface-0); 
   .kpi, .kpi:nth-last-child(-n+4), .kpis--7 .kpi, .kpis--7 .kpi:nth-last-child(-n+3) { grid-column: auto; }
 }
 /* ocultar la columna "Coste IA" (7ª) cuando no eres super_admin */
-.msgs--nocost th:nth-child(7), .msgs--nocost td:nth-child(7) { display: none; }
+.msgs--nocost th:nth-child(8), .msgs--nocost td:nth-child(8) { display: none; }
+.msgs__human { color: var(--sent); font-weight: 600; }
 .kpi__label { font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; display: flex; align-items: center; justify-content: center; gap: 7px; }
 .kpi__dot { width: 9px; height: 9px; border-radius: 50%; }
 .kpi__value { font-size: 42px; font-weight: 800; letter-spacing: -.02em; margin-top: 12px; line-height: 1; font-variant-numeric: tabular-nums; }

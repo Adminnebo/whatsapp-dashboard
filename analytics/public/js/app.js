@@ -152,18 +152,25 @@
     return `<span class="dim">${label}</span>`;
   }
 
+  function sentByCell(name) {
+    if (!name) return '<span class="dim">—</span>';
+    const bot = String(name).trim().toLowerCase() === 'camila';
+    return `<span class="${bot ? 'dim' : 'msgs__human'}">${bot ? '🤖' : '👤'} ${escapeHtml(name)}</span>`;
+  }
+
   function renderMessages() {
     const d = msgData; if (!d) return;
     const tbl = $('#msgsTable'); if (tbl) tbl.classList.toggle('msgs--nocost', d.canSeeCost === false); // oculta col Coste IA
     const body = $('#msgsBody');
     if (!d.items.length) {
-      body.innerHTML = `<tr><td colspan="9" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="10" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
     } else {
       body.innerHTML = d.items.map(m => `<tr>
         <td class="nowrap">${fmtDateTime(m.inAt || m.outAt)}</td>
         <td class="nowrap">${m.phone ? escapeHtml(m.phone) : '<span class="dim">—</span>'}${m.name ? `<div class="msgs__name">${escapeHtml(m.name)}</div>` : ''}</td>
         <td class="msgs__in"><span class="msgs__text">${msgCell(m.inText, m.inType)}</span></td>
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
+        <td class="nowrap">${sentByCell(m.sentBy)}</td>
         <td class="num">${m.execSecs != null ? fmtExec(m.execSecs) : '<span class="dim">—</span>'}</td>
         <td class="cap">${m.model ? escapeHtml(m.model) : '<span class="dim">—</span>'}</td>
         <td class="num">${m.costUsd != null ? fmtUsd(m.costUsd) : '<span class="dim">—</span>'}</td>
@@ -198,7 +205,7 @@
       msgData = await res.json();
       renderMessages();
     } catch (e) {
-      $('#msgsBody').innerHTML = `<tr><td colspan="9" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
+      $('#msgsBody').innerHTML = `<tr><td colspan="10" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
     }
   }
 
