@@ -1,5 +1,6 @@
 # Backend full-stack (Express + Postgres). Railway inyecta $PORT.
-FROM node:20-alpine
+# Node 22: requerido por @supabase/supabase-js (WebSocket nativo).
+FROM node:22-alpine
 WORKDIR /app
 
 # Instala dependencias con lockfile (reproducible)
