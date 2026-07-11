@@ -4,7 +4,20 @@
   const cssvar = n => getComputedStyle(document.body).getPropertyValue(n).trim();
   const colors = () => ({ received: cssvar('--received'), sent: cssvar('--sent') });
   let current = null, days = 30;
+  let customFrom = null, customTo = null;
   let msgPage = 1, msgData = null, msgSearch = '';
+
+  // Construye los parámetros de rango: fechas específicas o preset de días.
+  function rangeParams() {
+    const p = new URLSearchParams();
+    if (customFrom || customTo) {
+      if (customFrom) p.set('from', customFrom);
+      if (customTo) p.set('to', customTo);
+    } else {
+      p.set('days', String(days));
+    }
+    return p;
+  }
 
   const fmtNum = n => (Number(n) || 0).toLocaleString('es-MX');
   const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -54,7 +67,10 @@
   function render() {
     const s = current; if (!s) return;
     const col = colors();
-    $('#rangeLabel').textContent = (s.range.days >= 100000 ? 'Todo el histórico' : `Últimos ${s.range.days} días`) + ` · ${s.range.tz}`;
+    let rlabel;
+    if (customFrom || customTo) rlabel = `${customFrom || '…'} → ${customTo || 'hoy'}`;
+    else rlabel = (days === 'all' || Number(days) >= 100000) ? 'Todo el histórico' : `Últimos ${days} días`;
+    $('#rangeLabel').textContent = rlabel + ` · ${s.range.tz}`;
 
     // KPIs
     const rt = s.responseTime;
@@ -145,7 +161,9 @@
 
   async function loadMessages() {
     try {
-      const params = new URLSearchParams({ days: String(days), page: String(msgPage), limit: '50' });
+      const params = rangeParams();
+      params.set('page', String(msgPage));
+      params.set('limit', '50');
       if (msgSearch) params.set('search', msgSearch);
       const res = await fetch('/api/messages?' + params.toString());
       msgData = await res.json();
@@ -157,7 +175,7 @@
 
   async function load() {
     try {
-      const res = await fetch('/api/stats?days=' + days);
+      const res = await fetch('/api/stats?' + rangeParams().toString());
       current = await res.json();
       render();
     } catch (e) { $('#kpis').innerHTML = `<div class="kpi kpi--muted"><div class="kpi__value">Error</div><div class="kpi__sub">${e.message}</div></div>`; }
@@ -173,6 +191,25 @@
       $('#rangeSeg').querySelectorAll('.seg').forEach(x => x.classList.remove('seg--active'));
       b.classList.add('seg--active');
       days = b.dataset.days === 'all' ? 'all' : Number(b.dataset.days);
+      customFrom = customTo = null;                       // preset cancela rango custom
+      $('#dateFrom').value = ''; $('#dateTo').value = ''; $('#dateClear').hidden = true;
+      msgPage = 1;
+      load(); loadMessages();
+    });
+    $('#dateApply').addEventListener('click', () => {
+      const f = $('#dateFrom').value, t = $('#dateTo').value;
+      if (!f && !t) return;
+      customFrom = f || null; customTo = t || null;
+      $('#rangeSeg').querySelectorAll('.seg').forEach(x => x.classList.remove('seg--active'));
+      $('#dateClear').hidden = false;
+      msgPage = 1;
+      load(); loadMessages();
+    });
+    $('#dateClear').addEventListener('click', () => {
+      customFrom = customTo = null;
+      $('#dateFrom').value = ''; $('#dateTo').value = ''; $('#dateClear').hidden = true;
+      days = 30;
+      $('#rangeSeg').querySelectorAll('.seg').forEach(x => x.classList.toggle('seg--active', x.dataset.days === '30'));
       msgPage = 1;
       load(); loadMessages();
     });

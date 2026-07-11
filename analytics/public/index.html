@@ -24,6 +24,13 @@
         <button class="seg" data-days="90">90 días</button>
         <button class="seg" data-days="all">Todo</button>
       </div>
+      <div class="daterange" id="dateRange">
+        <input type="date" id="dateFrom" class="date-input" title="Desde" />
+        <span class="date-sep">→</span>
+        <input type="date" id="dateTo" class="date-input" title="Hasta" />
+        <button class="date-btn" id="dateApply">Aplicar</button>
+        <button class="date-btn date-btn--clear" id="dateClear" title="Quitar rango" hidden>✕</button>
+      </div>
       <button class="icon-btn" id="btnRefresh" title="Actualizar">↻</button>
       <button class="icon-btn" id="btnTheme" title="Tema claro/oscuro">◐</button>
     </div>

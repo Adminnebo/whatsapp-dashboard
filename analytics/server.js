@@ -21,6 +21,30 @@ const COST_CCY = process.env.MSG_COST_CURRENCY || 'USD';
 
 const wrap = fn => (req, res) => Promise.resolve(fn(req, res)).catch(e => { console.error(req.path, e.message); res.status(500).json({ error: e.message }); });
 
+// Rango de fechas: ?from=YYYY-MM-DD&to=YYYY-MM-DD (fechas específicas) o ?days=N|all.
+// 'to' es inclusivo (día completo). Devuelve {from, to} ISO. Mínimo 2000-01-01.
+function rangeOf(req) {
+  const now = Date.now();
+  const minMs = Date.parse('2000-01-01T00:00:00Z');
+  const day = 86400000;
+  let fromMs, toMs;
+  const qf = String(req.query.from || '').trim();
+  const qt = String(req.query.to || '').trim();
+  if (qf || qt) {
+    fromMs = qf ? Date.parse(qf) : minMs;
+    toMs = qt ? Date.parse(qt) + day : now;   // incluye todo el día 'to'
+    if (isNaN(fromMs)) fromMs = minMs;
+    if (isNaN(toMs)) toMs = now;
+  } else {
+    const days = req.query.days === 'all' ? 100000 : (Number(req.query.days) || 30);
+    fromMs = now - days * day;
+    toMs = now + 1000;
+  }
+  if (fromMs < minMs) fromMs = minMs;
+  if (toMs < fromMs) toMs = fromMs + day;
+  return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() };
+}
+
 // Cotizaciones: viven en una base MSSQL aparte (site4now). Conexión por env MSSQL_*.
 // Cuenta las filas de la tabla de cotizaciones en el rango de fechas.
 let mssqlPool = null;
@@ -43,15 +67,17 @@ async function getMssql() {
     return mssqlPool;
   } catch (e) { mssqlPool = null; throw e; }
 }
-async function quotesStat(from) {
+async function quotesStat(from, to) {
   if (!process.env.MSSQL_SERVER) return { available: false };
   const table = process.env.MSSQL_QUOTES_TABLE || 'iCotizacionesWebIA';
   const dateCol = process.env.MSSQL_QUOTES_DATE || 'FechaRegistro';
   const amountCol = process.env.MSSQL_QUOTES_AMOUNT || 'total';
   try {
     const pool = await getMssql();
-    const r = await pool.request().input('from', sql.DateTime, new Date(from))
-      .query(`SELECT COUNT(*) AS n, COALESCE(SUM([${amountCol}]),0) AS monto FROM [${table}] WHERE [${dateCol}] >= @from`);
+    const r = await pool.request()
+      .input('from', sql.DateTime, new Date(from))
+      .input('to', sql.DateTime, new Date(to || Date.now()))
+      .query(`SELECT COUNT(*) AS n, COALESCE(SUM([${amountCol}]),0) AS monto FROM [${table}] WHERE [${dateCol}] >= @from AND [${dateCol}] < @to`);
     const row = r.recordset[0] || {};
     return { available: true, count: Number(row.n) || 0, amount: Number(row.monto) || 0 };
   } catch (e) {
@@ -63,11 +89,7 @@ async function quotesStat(from) {
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 app.get('/api/stats', wrap(async (req, res) => {
-  const days = req.query.days === 'all' ? 100000 : (Number(req.query.days) || 30);
-  let fromMs = Date.now() - days * 86400000;
-  const minMs = Date.parse('2000-01-01T00:00:00Z'); // MSSQL DateTime no admite < 1753
-  if (fromMs < minMs) fromMs = minMs;
-  const from = new Date(fromMs).toISOString();
+  const { from, to } = rangeOf(req);
 
   const [kpi, rt, byDay, byHour, byType, execT, aiRows, quotes] = await Promise.all([
     q(`SELECT count(*) FILTER (WHERE direction='out') AS sent,
@@ -75,39 +97,39 @@ app.get('/api/stats', wrap(async (req, res) => {
               COALESCE(SUM(charged_usd),0) AS charged,
               max(created_at) FILTER (WHERE direction='out') AS last_sent_at,
               count(DISTINCT conversation_id) AS active_convs
-       FROM messages WHERE created_at >= $1`, [from]),
+       FROM messages WHERE created_at >= $1 AND created_at < $2`, [from, to]),
     q(`WITH seq AS (
          SELECT conversation_id, direction, created_at,
                 LAG(direction)  OVER w AS pd,
                 LAG(created_at) OVER w AS pa
-         FROM messages WHERE created_at >= $1
+         FROM messages WHERE created_at >= $1 AND created_at < $2
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at))
        SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (created_at - pa))) AS median_secs,
               avg(EXTRACT(EPOCH FROM (created_at - pa))) AS avg_secs,
               percentile_cont(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (created_at - pa))) AS p90_secs,
               count(*) AS n
-       FROM seq WHERE direction='out' AND pd='in' AND (created_at - pa) < interval '6 hours'`, [from]),
-    q(`SELECT to_char(date_trunc('day', created_at AT TIME ZONE $2), 'YYYY-MM-DD') AS day,
+       FROM seq WHERE direction='out' AND pd='in' AND (created_at - pa) < interval '6 hours'`, [from, to]),
+    q(`SELECT to_char(date_trunc('day', created_at AT TIME ZONE $3), 'YYYY-MM-DD') AS day,
               count(*) FILTER (WHERE direction='out') AS sent,
               count(*) FILTER (WHERE direction='in')  AS received
-       FROM messages WHERE created_at >= $1 GROUP BY 1 ORDER BY 1`, [from, TZ]),
-    q(`SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE $2)::int AS hour,
+       FROM messages WHERE created_at >= $1 AND created_at < $2 GROUP BY 1 ORDER BY 1`, [from, to, TZ]),
+    q(`SELECT EXTRACT(HOUR FROM created_at AT TIME ZONE $3)::int AS hour,
               count(*) FILTER (WHERE direction='out') AS sent,
               count(*) FILTER (WHERE direction='in')  AS received
-       FROM messages WHERE created_at >= $1 GROUP BY 1 ORDER BY 1`, [from, TZ]),
+       FROM messages WHERE created_at >= $1 AND created_at < $2 GROUP BY 1 ORDER BY 1`, [from, to, TZ]),
     q(`SELECT COALESCE(type,'text') AS type, count(*)::int AS n
-       FROM messages WHERE created_at >= $1 AND direction='out' GROUP BY 1 ORDER BY 2 DESC`, [from]),
+       FROM messages WHERE created_at >= $1 AND created_at < $2 AND direction='out' GROUP BY 1 ORDER BY 2 DESC`, [from, to]),
     q(`SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY execution_ms) AS median_secs,
               avg(execution_ms) AS avg_secs,
               percentile_cont(0.9) WITHIN GROUP (ORDER BY execution_ms) AS p90_secs,
               count(*) AS n
-       FROM messages WHERE created_at >= $1 AND execution_ms IS NOT NULL`, [from]),
+       FROM messages WHERE created_at >= $1 AND created_at < $2 AND execution_ms IS NOT NULL`, [from, to]),
     q(`SELECT COALESCE(NULLIF(TRIM(model),''),'(desconocido)') AS model,
               count(*)::int AS runs, COALESCE(SUM(cost_usd),0) AS usd
        FROM messages
-       WHERE created_at >= $1 AND (cost_usd IS NOT NULL OR model IS NOT NULL)
-       GROUP BY 1 ORDER BY 3 DESC`, [from]),
-    quotesStat(from)
+       WHERE created_at >= $1 AND created_at < $2 AND (cost_usd IS NOT NULL OR model IS NOT NULL)
+       GROUP BY 1 ORDER BY 3 DESC`, [from, to]),
+    quotesStat(from, to)
   ]);
 
   const k = kpi.rows[0] || {};
@@ -125,7 +147,7 @@ app.get('/api/stats', wrap(async (req, res) => {
   const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, sent: Number((hourMap[h] || {}).sent) || 0, received: Number((hourMap[h] || {}).received) || 0 }));
 
   res.json({
-    range: { days, from, tz: TZ },
+    range: { from, to, tz: TZ },
     kpi: {
       sent: Number(k.sent) || 0,
       received: Number(k.received) || 0,
@@ -158,18 +180,14 @@ app.get('/api/stats', wrap(async (req, res) => {
 // saliente cuyo mensaje inmediatamente anterior en la conversación fue entrante.
 const trunc = (t, n) => (t && t.length > n ? t.slice(0, n) + '…' : (t || ''));
 app.get('/api/messages', wrap(async (req, res) => {
-  const days = req.query.days === 'all' ? 100000 : (Number(req.query.days) || 30);
-  let fromMs = Date.now() - days * 86400000;
-  const minMs = Date.parse('2000-01-01T00:00:00Z');
-  if (fromMs < minMs) fromMs = minMs;
-  const from = new Date(fromMs).toISOString();
+  const { from, to } = rangeOf(req);
 
   const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 50));
   const page = Math.max(1, Number(req.query.page) || 1);
   const offset = (page - 1) * limit;
   const search = String(req.query.search || '').trim();
 
-  const params = [from];
+  const params = [from, to];
   let searchClause = '';
   if (search) {
     params.push('%' + search + '%');
@@ -183,7 +201,7 @@ app.get('/api/messages', wrap(async (req, res) => {
                 LAG(text)       OVER w AS prev_text,
                 LAG(type)       OVER w AS prev_type,
                 LAG(created_at) OVER w AS prev_at
-         FROM messages WHERE created_at >= $1
+         FROM messages WHERE created_at >= $1 AND created_at < $2
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at, id))
        SELECT s.id, s.conversation_id, s.created_at AS out_at, s.status, s.execution_ms, s.model, s.cost_usd, s.charged_usd,
               s.text AS out_text, s.type AS out_type,
@@ -200,7 +218,7 @@ app.get('/api/messages', wrap(async (req, res) => {
          SELECT conversation_id, direction, text,
                 LAG(direction) OVER w AS prev_dir,
                 LAG(text)      OVER w AS prev_text
-         FROM messages WHERE created_at >= $1
+         FROM messages WHERE created_at >= $1 AND created_at < $2
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at, id))
        SELECT count(*)::int AS n
        FROM seq s

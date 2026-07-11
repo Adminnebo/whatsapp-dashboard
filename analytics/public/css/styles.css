@@ -50,6 +50,14 @@ body { font-family: Inter, system-ui, sans-serif; background: var(--surface-0); 
 .icon-btn { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary); cursor: pointer; font-size: 16px; }
 .icon-btn:hover { color: var(--text-primary); }
 
+.daterange { display: inline-flex; align-items: center; gap: 6px; }
+.date-input { padding: 6px 9px; font-size: 12.5px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); color: var(--text-primary); color-scheme: light dark; }
+.date-input:focus { outline: none; border-color: var(--sent); }
+.date-sep { color: var(--text-muted); font-size: 12px; }
+.date-btn { padding: 6px 11px; font-size: 12.5px; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1); color: var(--text-primary); cursor: pointer; }
+.date-btn:hover { background: var(--surface-0); }
+.date-btn--clear { padding: 6px 9px; color: var(--text-muted); }
+
 .wrap { max-width: 1560px; margin: 0 auto; padding: 30px clamp(20px, 3vw, 48px); display: flex; flex-direction: column; gap: 26px; }
 
 /* ===== KPIs ===== */
