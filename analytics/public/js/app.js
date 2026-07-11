@@ -254,7 +254,11 @@
       render(); // re-pinta con los colores del tema
       renderMessages();
     });
-    setupAuth().then(() => { load(); loadMessages(); });
+    (async () => {
+      if (window.Auth) { const s = await Auth.requireSession(); if (!s) return; } // exige sesión
+      await setupAuth();
+      load(); loadMessages();
+    })();
     setInterval(() => { load(); loadMessages(); }, 60000); // refresco cada minuto
   }
   document.addEventListener('DOMContentLoaded', init);
