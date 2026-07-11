@@ -193,6 +193,36 @@ app.post('/api/bot-set', wrap(async (req, res) => {
   res.json({ ok: true, active: val === 'true' });
 }));
 
+// Estado combinado por contacto: ¿debe responder el bot a esta persona?
+// Junta el flag global, el handoff (tag en GHL), si su conversación está abierta
+// y si está dentro de la ventana de 24h de WhatsApp. `shouldReply` ya viene listo
+// para un IF en n8n.
+app.get('/api/bot-status', wrap(async (req, res) => {
+  const contactId = String(req.query.contactId || '').trim();
+  const botActive = await getFlag();
+
+  let handoff = false, conversationOpen = true, lastInboundAt = null;
+  if (contactId) {
+    const r = await q(
+      `SELECT conv.status, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
+       FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
+       WHERE c.ghl_contact_id = $1 LIMIT 1`, [contactId]);
+    if (r.rows.length) {
+      conversationOpen = String(r.rows[0].status || 'open') === 'open';
+      lastInboundAt = r.rows[0].last_inbound != null ? Number(r.rows[0].last_inbound) : null;
+    }
+    try {
+      const { json } = await ghl('/contacts/' + encodeURIComponent(contactId));
+      const tags = (json && json.contact && json.contact.tags) || [];
+      handoff = tags.map(t => String(t).toLowerCase()).includes(String(HANDOFF_TAG).toLowerCase());
+    } catch (_) { /* si GHL falla, no bloquea al bot por handoff */ }
+  }
+
+  const withinWindow = lastInboundAt != null ? (Date.now() - lastInboundAt) < 24 * 3600 * 1000 : true;
+  const shouldReply = botActive && !handoff && conversationOpen;
+  res.json({ ok: true, contactId: contactId || null, botActive, handoff, conversationOpen, lastInboundAt, withinWindow, shouldReply });
+}));
+
 // ---- GHL ----
 app.get('/api/ghl-name', wrap(async (req, res) => {
   const id = String(req.query.contactId || '').trim();
