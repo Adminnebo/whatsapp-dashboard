@@ -26,6 +26,20 @@ app.use(express.json({ limit: process.env.JSON_LIMIT || '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
 
+// ── Autenticación (Supabase) — módulo reutilizable en auth/ ──────────────────
+const authRouter = require('./auth/router');
+const { requireAuth, requireAdmin } = require('./auth/middleware');
+const { configured: authConfigured } = require('./auth/supabase');
+app.use('/api/auth', authRouter);
+// Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup']);
+app.use('/api', (req, res, next) => {
+  if (!authConfigured) return next();                    // sin Supabase configurado: modo abierto (no rompe)
+  if (req.path.startsWith('/auth/')) return next();      // el router de auth se protege solo
+  if (OPEN_API.has(req.path)) return next();             // integraciones máquina-a-máquina
+  return requireAuth(req, res, next);                    // todo lo demás exige sesión
+});
+
 // --- helpers ---
 const COLORS = ['#2f6df6', '#e2497a', '#1aa179', '#f59e0b', '#7c3aed', '#0ea5e9', '#ef4444', '#10b981'];
 function colorFor(n) { n = n || '?'; let h = 0; for (let i = 0; i < n.length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return COLORS[Math.abs(h) % COLORS.length]; }
@@ -350,6 +364,17 @@ app.post('/api/send-media', upload.single('file'), wrap(async (req, res) => {
 }));
 
 // ---- estáticos (frontend) ----
+// Usuarios de GHL (para vincularlos a un login desde el panel admin). Solo admin.
+app.get('/api/ghl-users', requireAdmin, wrap(async (_req, res) => {
+  const { json } = await ghl(`/users/?locationId=${encodeURIComponent(LOCATION_ID)}`);
+  const users = ((json && json.users) || []).map(u => ({
+    id: u.id,
+    name: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.name || u.email || u.id,
+    email: u.email || ''
+  }));
+  res.json({ users });
+}));
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

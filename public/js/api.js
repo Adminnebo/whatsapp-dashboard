@@ -18,6 +18,7 @@
   function headers() {
     const h = { 'Content-Type': 'application/json' };
     if (S().token) h['x-dashboard-token'] = S().token;
+    if (window.Auth && window.Auth.currentToken) h['Authorization'] = 'Bearer ' + window.Auth.currentToken;
     return h;
   }
 
@@ -125,6 +126,7 @@
       if (meta.text) fd.append('text', meta.text);
       const h = {};
       if (S().token) h['x-dashboard-token'] = S().token;
+      if (window.Auth && window.Auth.currentToken) h['Authorization'] = 'Bearer ' + window.Auth.currentToken;
       const res = await fetch(S().sendMediaUrl, { method: 'POST', headers: h, body: fd });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const t = await res.text();

@@ -557,5 +557,14 @@
   };
 
   global.App = App;
-  document.addEventListener('DOMContentLoaded', () => App.init());
+  document.addEventListener('DOMContentLoaded', async () => {
+    if (window.Auth) {
+      const s = await Auth.requireSession(); if (!s) return; // exige sesión
+      if (Auth.configured) {
+        const av = document.querySelector('.rail__avatar');
+        if (av) { av.title = 'Cerrar sesión'; av.style.cursor = 'pointer'; av.addEventListener('click', () => Auth.signOut()); }
+      }
+    }
+    App.init();
+  });
 })(window);
