@@ -60,6 +60,7 @@
     const rt = s.responseTime;
     const ex = s.execTime || {};
     const ai = s.aiCost || {};
+    const bl = s.billing || {};
     const q = s.quotes || {};
     $('#kpis').innerHTML = [
       kpi('Enviados', col.sent, fmtNum(s.kpi.sent), 'mensajes salientes'),
@@ -67,6 +68,7 @@
       kpi('Tiempo de respuesta', '', fmtSecs(rt.medianSecs), `mediana · prom ${fmtSecs(rt.avgSecs)} · p90 ${fmtSecs(rt.p90Secs)}`),
       kpi('Tiempo de ejecución', '', ex.samples ? fmtExec(ex.medianSecs) : '—', ex.samples ? `mediana · prom ${fmtExec(ex.avgSecs)} · p90 ${fmtExec(ex.p90Secs)} · ${fmtNum(ex.samples)} runs` : 'sin datos aún', !ex.samples),
       kpi('Consumo IA', '', ai.runs ? fmtUsd(ai.totalUsd) : '—', ai.runs ? `${fmtNum(ai.runs)} runs · ${(ai.byModel || []).map(m => `${m.model}: ${fmtUsd(m.usd)}`).join(' · ')}` : 'sin datos aún', !ai.runs),
+      kpi('Cobrado al cliente', '', bl.total != null ? fmtUsd(bl.total, 2) : '—', `${fmtNum(s.kpi.sent)} msg × ${fmtUsd(bl.perOut || 0, 2)}`),
       kpi('Último enviado', '', fmtDateTime(s.kpi.lastSentAt), relTime(s.kpi.lastSentAt)),
       kpi('Conversaciones', '', fmtNum(s.kpi.activeConversations), 'con actividad en el rango'),
       kpi('Cotizaciones', '', q.available ? fmtNum(q.count) : 'Pendiente', q.available ? (q.amount ? 'RD$ ' + fmtNum(Math.round(q.amount)) + ' cotizado' : 'enviadas en el rango') : 'configurar MSSQL', !q.available)

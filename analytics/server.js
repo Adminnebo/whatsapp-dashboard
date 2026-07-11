@@ -142,6 +142,7 @@ app.get('/api/stats', wrap(async (req, res) => {
       samples: Number(e.n) || 0
     },
     aiCost,
+    billing: { perOut: MSG_COST_OUT, currency: COST_CCY, total: (Number(k.sent) || 0) * MSG_COST_OUT },
     byDay: byDay.rows.map(x => ({ day: x.day, sent: Number(x.sent) || 0, received: Number(x.received) || 0 })),
     byHour: hours,
     byType: byType.rows.map(x => ({ type: x.type, n: x.n })),
