@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS conversations (id BIGSERIAL PRIMARY KEY, contact_id B
 CREATE TABLE IF NOT EXISTS messages (id BIGSERIAL PRIMARY KEY, conversation_id BIGINT REFERENCES conversations(id) ON DELETE CASCADE, wamid TEXT UNIQUE, direction TEXT, type TEXT DEFAULT 'text', text TEXT, template TEXT, media_url TEXT, media_mime TEXT, media_filename TEXT, media_data BYTEA, status TEXT, channel TEXT DEFAULT 'whatsapp', created_at TIMESTAMPTZ DEFAULT now());
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS execution_ms BIGINT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS label TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6);
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_conv_contact ON conversations(contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
@@ -99,11 +101,16 @@ function normalize(body, file, direction) {
   // como imágenes/PDF enviados en la misma ejecución). La manda quien llama.
   const rawLabel = body.label ?? body.tag ?? body.msgLabel ?? body.priority;
   const label = rawLabel != null && String(rawLabel).trim() !== '' ? String(rawLabel).trim().toLowerCase() : null;
+  // Modelo usado (deepseek/haiku) y coste del run en USD — los manda quien llama.
+  const model = body.model != null && String(body.model).trim() !== '' ? String(body.model).trim() : null;
+  let costUsd = body.costUsd ?? body.cost_usd ?? body.costUSD;
+  costUsd = (costUsd === '' || costUsd == null) ? null : Number(costUsd);
+  if (!Number.isFinite(costUsd)) costUsd = null;
   return {
     contactId: body.contactId != null ? String(body.contactId) : null,
     name: body.name || null, text, wamid: body.wamid || null, ts, type,
     direction, status: body.status || (direction === 'in' ? 'received' : 'sent'),
-    phone, channel: ch, mediaUrl, mediaMime, mediaName, preview, mediaData, executionMs: execMs, label
+    phone, channel: ch, mediaUrl, mediaMime, mediaName, preview, mediaData, executionMs: execMs, label, model, costUsd
   };
 }
 
@@ -117,12 +124,12 @@ conv AS (INSERT INTO conversations (contact_id, channel, last_message, last_mess
   ON CONFLICT (contact_id) DO UPDATE SET channel=EXCLUDED.channel, last_message=EXCLUDED.last_message, last_message_at=EXCLUDED.last_message_at, last_direction=EXCLUDED.last_direction, last_status=EXCLUDED.last_status,
     last_inbound=CASE WHEN EXCLUDED.last_direction='in' THEN EXCLUDED.last_message_at ELSE conversations.last_inbound END,
     unread_count=CASE WHEN EXCLUDED.last_direction='in' THEN conversations.unread_count+1 ELSE conversations.unread_count END, status='open', updated_at=now() RETURNING id)
-INSERT INTO messages (conversation_id, wamid, direction, type, text, status, channel, media_url, media_mime, media_filename, media_data, created_at, execution_ms, label)
-  SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17 FROM conv
+INSERT INTO messages (conversation_id, wamid, direction, type, text, status, channel, media_url, media_mime, media_filename, media_data, created_at, execution_ms, label, model, cost_usd)
+  SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17, $18, $19 FROM conv
   ON CONFLICT (wamid) DO NOTHING RETURNING id, conversation_id;`;
 
 async function saveMessage(n) {
-  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null];
+  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null];
   const r = await q(SAVE_SQL, params);
   const row = r.rows[0] || {};
   return { id: row.id != null ? String(row.id) : null, conversationId: row.conversation_id != null ? String(row.conversation_id) : null };
