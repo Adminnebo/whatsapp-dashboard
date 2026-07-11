@@ -27,6 +27,7 @@
     th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; color: #8b8f9a; padding: 10px 12px; border-bottom: 1px solid #2a2d36; }
     td { padding: 11px 12px; border-bottom: 1px solid #23262f; }
     .pill { font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 20px; }
+    .pill--super_admin { background: rgba(235,104,52,.2); color: #f0996b; }
     .pill--admin { background: rgba(53,116,224,.2); color: #7aa7f5; }
     .pill--agent { background: rgba(255,255,255,.08); color: #b7bcc7; }
     .msg { font-size: 13px; min-height: 18px; margin-top: 10px; }
@@ -80,7 +81,7 @@
     async function guard() {
       const s = await Auth.requireSession(); if (!s) return false;
       const me = await Auth.me();
-      if (!me || !me.profile || me.profile.role !== 'admin') {
+      if (!me || !me.profile || !['admin', 'super_admin'].includes(me.profile.role)) {
         document.querySelector('.wrap').innerHTML = '<div class="card"><h2>Sin acceso</h2><p class="dim">Esta página es solo para administradores.</p><p style="margin-top:12px"><a href="/">← Volver</a></p></div>';
         return false;
       }
@@ -101,7 +102,7 @@
       $('#tbody').innerHTML = users.map(u => `<tr data-id="${u.id}">
         <td>${esc(u.email)}</td>
         <td>${esc(u.fullName || '—')}</td>
-        <td><span class="pill pill--${u.role}">${u.role === 'admin' ? 'Admin' : 'Agente'}</span></td>
+        <td><span class="pill pill--${u.role}">${u.role === 'super_admin' ? 'Super admin' : u.role === 'admin' ? 'Admin' : 'Agente'}</span></td>
         <td class="dim">${esc(ghlName(u.ghlUserId))}</td>
         <td class="dim">${fmt(u.lastSignInAt)}</td>
         <td class="row-actions">
