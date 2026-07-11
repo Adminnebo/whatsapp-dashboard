@@ -13,6 +13,10 @@
     const dec = v < 1 ? 4 : 2;
     return (ccy || 'USD') + ' ' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: dec, maximumFractionDigits: dec });
   }
+  function fmtUsd(v, maxDec) {
+    if (v == null) return '—';
+    return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: maxDec || 4 });
+  }
   function fmtSecs(s) {
     if (s == null) return '—';
     if (s < 90) return Math.round(s) + ' s';
@@ -54,12 +58,14 @@
     // KPIs
     const rt = s.responseTime;
     const ex = s.execTime || {};
+    const ai = s.aiCost || {};
     const q = s.quotes || {};
     $('#kpis').innerHTML = [
       kpi('Enviados', col.sent, fmtNum(s.kpi.sent), 'mensajes salientes'),
       kpi('Recibidos', col.received, fmtNum(s.kpi.received), 'mensajes entrantes'),
       kpi('Tiempo de respuesta', '', fmtSecs(rt.medianSecs), `mediana · prom ${fmtSecs(rt.avgSecs)} · p90 ${fmtSecs(rt.p90Secs)}`),
       kpi('Tiempo de ejecución', '', ex.samples ? fmtExec(ex.medianSecs) : '—', ex.samples ? `mediana · prom ${fmtExec(ex.avgSecs)} · p90 ${fmtExec(ex.p90Secs)} · ${fmtNum(ex.samples)} runs` : 'sin datos aún', !ex.samples),
+      kpi('Consumo IA', '', ai.runs ? fmtUsd(ai.totalUsd) : '—', ai.runs ? `${fmtNum(ai.runs)} runs · ${(ai.byModel || []).map(m => `${m.model}: ${fmtUsd(m.usd)}`).join(' · ')}` : 'sin datos aún', !ai.runs),
       kpi('Último enviado', '', fmtDateTime(s.kpi.lastSentAt), relTime(s.kpi.lastSentAt)),
       kpi('Conversaciones', '', fmtNum(s.kpi.activeConversations), 'con actividad en el rango'),
       kpi('Cotizaciones', '', q.available ? fmtNum(q.count) : 'Pendiente', q.available ? (q.amount ? 'RD$ ' + fmtNum(Math.round(q.amount)) + ' cotizado' : 'enviadas en el rango') : 'configurar MSSQL', !q.available)
@@ -103,7 +109,7 @@
     const d = msgData; if (!d) return;
     const body = $('#msgsBody');
     if (!d.items.length) {
-      body.innerHTML = `<tr><td colspan="7" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="9" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
     } else {
       body.innerHTML = d.items.map(m => `<tr>
         <td class="nowrap">${fmtDateTime(m.inAt || m.outAt)}</td>
@@ -111,6 +117,8 @@
         <td class="msgs__in"><span class="msgs__text">${msgCell(m.inText, m.inType)}</span></td>
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
         <td class="num">${m.execSecs != null ? fmtExec(m.execSecs) : '<span class="dim">—</span>'}</td>
+        <td class="cap">${m.model ? escapeHtml(m.model) : '<span class="dim">—</span>'}</td>
+        <td class="num">${m.costUsd != null ? fmtUsd(m.costUsd, 6) : '<span class="dim">—</span>'}</td>
         <td class="num">${fmtCost(m.cost, d.cost.currency)}</td>
         <td class="cap dim">${escapeHtml(m.status || '—')}</td>
       </tr>`).join('');
@@ -140,7 +148,7 @@
       msgData = await res.json();
       renderMessages();
     } catch (e) {
-      $('#msgsBody').innerHTML = `<tr><td colspan="7" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
+      $('#msgsBody').innerHTML = `<tr><td colspan="9" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
     }
   }
 
