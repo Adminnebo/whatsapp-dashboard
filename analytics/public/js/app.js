@@ -13,9 +13,10 @@
     const dec = v < 1 ? 4 : 2;
     return (ccy || 'USD') + ' ' + Number(v).toLocaleString('es-MX', { minimumFractionDigits: dec, maximumFractionDigits: dec });
   }
-  function fmtUsd(v, maxDec) {
+  function fmtUsd(v, dec) {
     if (v == null) return '—';
-    return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: maxDec || 4 });
+    const d = dec || 3;
+    return '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   }
   function fmtSecs(s) {
     if (s == null) return '—';
@@ -118,7 +119,7 @@
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
         <td class="num">${m.execSecs != null ? fmtExec(m.execSecs) : '<span class="dim">—</span>'}</td>
         <td class="cap">${m.model ? escapeHtml(m.model) : '<span class="dim">—</span>'}</td>
-        <td class="num">${m.costUsd != null ? fmtUsd(m.costUsd, 6) : '<span class="dim">—</span>'}</td>
+        <td class="num">${m.costUsd != null ? fmtUsd(m.costUsd) : '<span class="dim">—</span>'}</td>
         <td class="num">${fmtCost(m.cost, d.cost.currency)}</td>
         <td class="cap dim">${escapeHtml(m.status || '—')}</td>
       </tr>`).join('');
