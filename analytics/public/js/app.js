@@ -5,7 +5,7 @@
   const colors = () => ({ received: cssvar('--received'), sent: cssvar('--sent') });
   let current = null, days = 30;
   let customFrom = null, customTo = null;
-  let msgPage = 1, msgData = null, msgSearch = '';
+  let msgPage = 1, msgData = null, msgSearch = '', msgSender = 'all';
 
   // Construye los parámetros de rango: fechas específicas o preset de días.
   function rangeParams() {
@@ -201,6 +201,7 @@
       params.set('page', String(msgPage));
       params.set('limit', '50');
       if (msgSearch) params.set('search', msgSearch);
+      if (msgSender !== 'all') params.set('sender', msgSender);
       const res = await fetch('/api/messages?' + params.toString(), { headers: authHeaders() });
       msgData = await res.json();
       renderMessages();
@@ -268,6 +269,13 @@
       const v = e.target.value.trim();
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => { msgSearch = v; msgPage = 1; loadMessages(); }, 350);
+    });
+    $('#senderSeg').addEventListener('click', e => {
+      const b = e.target.closest('.seg'); if (!b) return;
+      $('#senderSeg').querySelectorAll('.seg').forEach(x => x.classList.remove('seg--active'));
+      b.classList.add('seg--active');
+      msgSender = b.dataset.sender; msgPage = 1;
+      loadMessages();
     });
     $('#btnRefresh').addEventListener('click', () => { load(); loadMessages(); });
     $('#btnTheme').addEventListener('click', () => {

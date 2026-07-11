@@ -201,6 +201,10 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
     params.push('%' + search + '%');
     searchClause = ` AND (c.phone ILIKE $${params.length} OR c.name ILIKE $${params.length} OR s.text ILIKE $${params.length} OR s.prev_text ILIKE $${params.length})`;
   }
+  const sender = String(req.query.sender || 'all');   // all | bot (Camila) | human (usuarios)
+  let senderClause = '';
+  if (sender === 'bot') senderClause = ` AND lower(s.sent_by) = 'camila'`;
+  else if (sender === 'human') senderClause = ` AND s.sent_by IS NOT NULL AND lower(s.sent_by) <> 'camila'`;
 
   const [rows, totalR] = await Promise.all([
     q(`WITH seq AS (
@@ -219,11 +223,11 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
        FROM seq s
        JOIN conversations cv ON cv.id = s.conversation_id
        JOIN contacts c ON c.id = cv.contact_id
-       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}
+       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}${senderClause}
        ORDER BY s.created_at DESC, s.id DESC
        LIMIT ${limit} OFFSET ${offset}`, params),
     q(`WITH seq AS (
-         SELECT conversation_id, direction, text,
+         SELECT conversation_id, direction, text, sent_by,
                 LAG(direction) OVER w AS prev_dir,
                 LAG(text)      OVER w AS prev_text
          FROM messages WHERE created_at >= $1 AND created_at < $2
@@ -232,7 +236,7 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
        FROM seq s
        JOIN conversations cv ON cv.id = s.conversation_id
        JOIN contacts c ON c.id = cv.contact_id
-       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}`, params)
+       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}${senderClause}`, params)
   ]);
 
   const total = totalR.rows[0] ? totalR.rows[0].n : 0;
