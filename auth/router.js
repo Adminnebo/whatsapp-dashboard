@@ -61,12 +61,15 @@ router.patch('/users/:id', requireAuth, requireAdmin, async (req, res) => {
   if (b.role && ROLES.includes(b.role)) patch.role = b.role;
   if ('fullName' in b) patch.full_name = b.fullName || null;
   if ('ghlUserId' in b) patch.ghl_user_id = b.ghlUserId || null;
-  if (Object.keys(patch).length) {
-    const { error } = await admin.from('profiles').update(patch).eq('id', req.params.id);
+  const authUpd = {};
+  if (b.password) authUpd.password = String(b.password);
+  if (b.email) { authUpd.email = String(b.email).trim().toLowerCase(); patch.email = authUpd.email; }
+  if (Object.keys(authUpd).length) {
+    const { error } = await admin.auth.admin.updateUserById(req.params.id, authUpd);
     if (error) return res.status(400).json({ error: error.message });
   }
-  if (b.password) {
-    const { error } = await admin.auth.admin.updateUserById(req.params.id, { password: String(b.password) });
+  if (Object.keys(patch).length) {
+    const { error } = await admin.from('profiles').update(patch).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
   }
   res.json({ ok: true });

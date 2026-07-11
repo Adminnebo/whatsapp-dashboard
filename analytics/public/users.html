@@ -34,6 +34,12 @@
     .msg--err { color: #f87171; } .msg--ok { color: #34d399; }
     .row-actions { display: flex; gap: 8px; }
     .dim { color: #8b8f9a; }
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 100; padding: 20px; }
+    .modal[hidden] { display: none; }
+    .modal__card { width: 100%; max-width: 420px; background: #1a1c22; border: 1px solid #2a2d36; border-radius: 14px; padding: 24px; max-height: 90vh; overflow: auto; }
+    .modal__card h2 { font-size: 16px; margin-bottom: 6px; }
+    .modal__card label { margin-top: 12px; }
+    .modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
   </style>
 </head>
 <body>
@@ -62,8 +68,21 @@
     </div>
   </div>
 
+  <div class="modal" id="editModal" hidden>
+    <div class="modal__card">
+      <h2>Editar usuario</h2>
+      <label>Correo</label><input type="email" id="eEmail" />
+      <label>Nombre</label><input type="text" id="eName" />
+      <label>Rol</label><select id="eRole"><option value="agent">Agente</option><option value="admin">Admin</option></select>
+      <label>Nueva contraseña <span class="dim">(vacío = no cambiar)</span></label><input type="text" id="ePass" placeholder="••••••" />
+      <div class="modal__actions"><button class="btn" id="eCancel">Cancelar</button><button class="btn btn--primary" id="eSave">Guardar</button></div>
+      <div class="msg" id="editMsg"></div>
+    </div>
+  </div>
+
   <script src="js/auth.js"></script>
   <script>
+    let usersList = [], editingId = null;
     const $ = s => document.querySelector(s);
     const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const fmt = iso => { if (!iso) return '—'; try { return new Date(iso).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }); } catch (_) { return '—'; } };
@@ -83,6 +102,7 @@
       const r = await Auth.fetch('/api/auth/users');
       if (!r.ok) { $('#listMsg').className = 'msg msg--err'; $('#listMsg').textContent = 'Error al cargar'; return; }
       const { users } = await r.json();
+      usersList = users;
       $('#count').textContent = users.length;
       $('#tbody').innerHTML = users.map(u => `<tr data-id="${u.id}">
         <td>${esc(u.email)}</td>
@@ -111,16 +131,32 @@
         if (!confirm('¿Eliminar este usuario?')) return;
         const r = await Auth.fetch('/api/auth/users/' + id, { method: 'DELETE' });
         if (r.ok) loadUsers();
-      } else {
-        const patch = {};
-        const role = prompt('Rol (admin / agent):', '');
-        if (role && ['admin', 'agent'].includes(role.trim())) patch.role = role.trim();
-        const pass = prompt('Nueva contraseña (vacío = no cambiar):', '');
-        if (pass) patch.password = pass;
-        if (!Object.keys(patch).length) return;
-        const r = await Auth.fetch('/api/auth/users/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
-        if (r.ok) loadUsers(); else { const d = await r.json().catch(() => ({})); alert(d.error || 'Error'); }
-      }
+      } else { openEdit(id); }
+    });
+
+    function openEdit(id) {
+      const u = usersList.find(x => x.id === id); if (!u) return;
+      editingId = id;
+      $('#eEmail').value = u.email || '';
+      $('#eName').value = u.fullName || '';
+      const roleSel = $('#eRole');
+      if (u.role === 'super_admin') { roleSel.innerHTML = '<option value="super_admin">Super admin (solo por API)</option>'; roleSel.value = 'super_admin'; roleSel.disabled = true; }
+      else { roleSel.innerHTML = '<option value="agent">Agente</option><option value="admin">Admin</option>'; roleSel.value = u.role; roleSel.disabled = false; }
+      $('#ePass').value = ''; $('#editMsg').textContent = '';
+      $('#editModal').hidden = false;
+    }
+    function closeEdit() { $('#editModal').hidden = true; editingId = null; }
+    $('#eCancel').addEventListener('click', closeEdit);
+    $('#editModal').addEventListener('click', e => { if (e.target.id === 'editModal') closeEdit(); });
+
+    $('#eSave').addEventListener('click', async () => {
+      if (!editingId) return;
+      const patch = { email: $('#eEmail').value.trim(), fullName: $('#eName').value.trim() || null };
+      if (!$('#eRole').disabled) patch.role = $('#eRole').value;
+      const pass = $('#ePass').value; if (pass) patch.password = pass;
+      const r = await Auth.fetch('/api/auth/users/' + editingId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      if (r.ok) { closeEdit(); loadUsers(); }
+      else { const d = await r.json().catch(() => ({})); const m = $('#editMsg'); m.className = 'msg msg--err'; m.textContent = d.error || 'Error'; }
     });
 
     (async () => { if (await guard()) loadUsers(); })();

@@ -61,11 +61,15 @@ router.patch('/users/:id', requireAdmin, async (req, res) => {
   const patch = {};
   if (b.role && ROLES.includes(b.role)) patch.role = b.role;
   if ('fullName' in b) patch.full_name = b.fullName || null;
+  const authUpd = {};
+  if (b.password) authUpd.password = String(b.password);
+  if (b.email) { authUpd.email = String(b.email).trim().toLowerCase(); patch.email = authUpd.email; }
+  if (Object.keys(authUpd).length) {
+    const r = await fetch(URL + '/auth/v1/admin/users/' + req.params.id, { method: 'PUT', headers: svc(), body: JSON.stringify(authUpd) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); return res.status(400).json({ error: e.msg || e.error_description || ('update ' + r.status) }); }
+  }
   if (Object.keys(patch).length) {
     await fetch(URL + '/rest/v1/profiles?id=eq.' + req.params.id, { method: 'PATCH', headers: svc({ Prefer: 'return=minimal' }), body: JSON.stringify(patch) });
-  }
-  if (b.password) {
-    await fetch(URL + '/auth/v1/admin/users/' + req.params.id, { method: 'PUT', headers: svc(), body: JSON.stringify({ password: String(b.password) }) });
   }
   res.json({ ok: true });
 });
