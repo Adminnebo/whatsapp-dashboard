@@ -69,7 +69,7 @@ app.get('/api/stats', wrap(async (req, res) => {
   if (fromMs < minMs) fromMs = minMs;
   const from = new Date(fromMs).toISOString();
 
-  const [kpi, rt, byDay, byHour, byType, quotes] = await Promise.all([
+  const [kpi, rt, byDay, byHour, byType, execT, quotes] = await Promise.all([
     q(`SELECT count(*) FILTER (WHERE direction='out') AS sent,
               count(*) FILTER (WHERE direction='in')  AS received,
               max(created_at) FILTER (WHERE direction='out') AS last_sent_at,
@@ -96,11 +96,17 @@ app.get('/api/stats', wrap(async (req, res) => {
        FROM messages WHERE created_at >= $1 GROUP BY 1 ORDER BY 1`, [from, TZ]),
     q(`SELECT COALESCE(type,'text') AS type, count(*)::int AS n
        FROM messages WHERE created_at >= $1 AND direction='out' GROUP BY 1 ORDER BY 2 DESC`, [from]),
+    q(`SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY execution_ms) AS median_ms,
+              avg(execution_ms) AS avg_ms,
+              percentile_cont(0.9) WITHIN GROUP (ORDER BY execution_ms) AS p90_ms,
+              count(*) AS n
+       FROM messages WHERE created_at >= $1 AND execution_ms IS NOT NULL`, [from]),
     quotesStat(from)
   ]);
 
   const k = kpi.rows[0] || {};
   const r = rt.rows[0] || {};
+  const e = execT.rows[0] || {};
   const hourMap = {}; byHour.rows.forEach(x => { hourMap[x.hour] = x; });
   const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, sent: Number((hourMap[h] || {}).sent) || 0, received: Number((hourMap[h] || {}).received) || 0 }));
 
@@ -117,6 +123,12 @@ app.get('/api/stats', wrap(async (req, res) => {
       avgSecs: r.avg_secs != null ? Number(r.avg_secs) : null,
       p90Secs: r.p90_secs != null ? Number(r.p90_secs) : null,
       samples: Number(r.n) || 0
+    },
+    execTime: {
+      medianMs: e.median_ms != null ? Number(e.median_ms) : null,
+      avgMs: e.avg_ms != null ? Number(e.avg_ms) : null,
+      p90Ms: e.p90_ms != null ? Number(e.p90_ms) : null,
+      samples: Number(e.n) || 0
     },
     byDay: byDay.rows.map(x => ({ day: x.day, sent: Number(x.sent) || 0, received: Number(x.received) || 0 })),
     byHour: hours,
@@ -142,14 +154,14 @@ app.get('/api/messages', wrap(async (req, res) => {
 
   const [rows, totalR] = await Promise.all([
     q(`WITH seq AS (
-         SELECT id, conversation_id, direction, type, text, status, created_at,
+         SELECT id, conversation_id, direction, type, text, status, created_at, execution_ms,
                 LAG(direction)  OVER w AS prev_dir,
                 LAG(text)       OVER w AS prev_text,
                 LAG(type)       OVER w AS prev_type,
                 LAG(created_at) OVER w AS prev_at
          FROM messages WHERE created_at >= $1
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at, id))
-       SELECT id, conversation_id, created_at AS out_at, status,
+       SELECT id, conversation_id, created_at AS out_at, status, execution_ms,
               text AS out_text, type AS out_type,
               prev_text AS in_text, prev_type AS in_type, prev_at AS in_at,
               EXTRACT(EPOCH FROM (created_at - prev_at)) AS response_secs
@@ -179,6 +191,7 @@ app.get('/api/messages', wrap(async (req, res) => {
       outAt: m.out_at,
       status: m.status || '',
       responseSecs: m.response_secs != null ? Number(m.response_secs) : null,
+      execMs: m.execution_ms != null ? Number(m.execution_ms) : null,
       cost: MSG_COST_OUT
     }))
   });

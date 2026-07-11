@@ -19,6 +19,13 @@
     if (s < 3600) { const m = s / 60; return (m >= 10 ? Math.round(m) : m.toFixed(1)) + ' min'; }
     return (s / 3600).toFixed(1) + ' h';
   }
+  function fmtExec(ms) {
+    if (ms == null) return '—';
+    if (ms < 1000) return Math.round(ms) + ' ms';
+    const s = ms / 1000;
+    if (s < 60) return (s >= 10 ? s.toFixed(1) : s.toFixed(2)) + ' s';
+    return fmtSecs(s);
+  }
   function relTime(iso) {
     if (!iso) return '';
     const d = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -48,11 +55,13 @@
 
     // KPIs
     const rt = s.responseTime;
+    const ex = s.execTime || {};
     const q = s.quotes || {};
     $('#kpis').innerHTML = [
       kpi('Enviados', col.sent, fmtNum(s.kpi.sent), 'mensajes salientes'),
       kpi('Recibidos', col.received, fmtNum(s.kpi.received), 'mensajes entrantes'),
       kpi('Tiempo de respuesta', '', fmtSecs(rt.medianSecs), `mediana · prom ${fmtSecs(rt.avgSecs)} · p90 ${fmtSecs(rt.p90Secs)}`),
+      kpi('Tiempo de ejecución', '', ex.samples ? fmtExec(ex.medianMs) : '—', ex.samples ? `mediana · prom ${fmtExec(ex.avgMs)} · p90 ${fmtExec(ex.p90Ms)} · ${fmtNum(ex.samples)} runs` : 'sin datos aún', !ex.samples),
       kpi('Último enviado', '', fmtDateTime(s.kpi.lastSentAt), relTime(s.kpi.lastSentAt)),
       kpi('Conversaciones', '', fmtNum(s.kpi.activeConversations), 'con actividad en el rango'),
       kpi('Cotizaciones', '', q.available ? fmtNum(q.count) : 'Pendiente', q.available ? (q.amount ? 'RD$ ' + fmtNum(Math.round(q.amount)) + ' cotizado' : 'enviadas en el rango') : 'configurar MSSQL', !q.available)
@@ -96,13 +105,14 @@
     const d = msgData; if (!d) return;
     const body = $('#msgsBody');
     if (!d.items.length) {
-      body.innerHTML = `<tr><td colspan="6" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="7" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
     } else {
       body.innerHTML = d.items.map(m => `<tr>
         <td class="nowrap">${fmtDateTime(m.inAt || m.outAt)}</td>
         <td class="msgs__in"><span class="msgs__text">${msgCell(m.inText, m.inType)}</span></td>
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
         <td class="num">${m.responseSecs != null ? fmtSecs(m.responseSecs) : '<span class="dim">—</span>'}</td>
+        <td class="num">${m.execMs != null ? fmtExec(m.execMs) : '<span class="dim">—</span>'}</td>
         <td class="num">${fmtCost(m.cost, d.cost.currency)}</td>
         <td class="cap dim">${escapeHtml(m.status || '—')}</td>
       </tr>`).join('');
@@ -131,7 +141,7 @@
       msgData = await res.json();
       renderMessages();
     } catch (e) {
-      $('#msgsBody').innerHTML = `<tr><td colspan="6" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
+      $('#msgsBody').innerHTML = `<tr><td colspan="7" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
     }
   }
 
