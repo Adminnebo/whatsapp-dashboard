@@ -69,12 +69,14 @@
       <section class="card card--wide" id="msgsCard">
         <div class="card__head">
           <h2>Mensajes — entrante y respuesta</h2>
+          <input type="search" id="msgSearch" class="search-input" placeholder="Buscar teléfono, nombre o texto…" autocomplete="off" />
         </div>
         <div class="tablewrap">
           <table class="msgs msgs--pairs" id="msgsTable">
             <thead>
               <tr>
                 <th>Fecha</th>
+                <th>Teléfono</th>
                 <th>Entrante (cliente)</th>
                 <th>Respuesta (bot)</th>
                 <th class="num">Ejecución</th>

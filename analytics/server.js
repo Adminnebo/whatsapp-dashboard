@@ -151,6 +151,14 @@ app.get('/api/messages', wrap(async (req, res) => {
   const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 50));
   const page = Math.max(1, Number(req.query.page) || 1);
   const offset = (page - 1) * limit;
+  const search = String(req.query.search || '').trim();
+
+  const params = [from];
+  let searchClause = '';
+  if (search) {
+    params.push('%' + search + '%');
+    searchClause = ` AND (c.phone ILIKE $${params.length} OR c.name ILIKE $${params.length} OR s.text ILIKE $${params.length} OR s.prev_text ILIKE $${params.length})`;
+  }
 
   const [rows, totalR] = await Promise.all([
     q(`WITH seq AS (
@@ -161,19 +169,28 @@ app.get('/api/messages', wrap(async (req, res) => {
                 LAG(created_at) OVER w AS prev_at
          FROM messages WHERE created_at >= $1
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at, id))
-       SELECT id, conversation_id, created_at AS out_at, status, execution_ms,
-              text AS out_text, type AS out_type,
-              prev_text AS in_text, prev_type AS in_type, prev_at AS in_at,
-              EXTRACT(EPOCH FROM (created_at - prev_at)) AS response_secs
-       FROM seq
-       WHERE direction='out' AND prev_dir='in'
-       ORDER BY created_at DESC, id DESC
-       LIMIT ${limit} OFFSET ${offset}`, [from]),
+       SELECT s.id, s.conversation_id, s.created_at AS out_at, s.status, s.execution_ms,
+              s.text AS out_text, s.type AS out_type,
+              s.prev_text AS in_text, s.prev_type AS in_type, s.prev_at AS in_at,
+              EXTRACT(EPOCH FROM (s.created_at - s.prev_at)) AS response_secs,
+              c.phone, c.name
+       FROM seq s
+       JOIN conversations cv ON cv.id = s.conversation_id
+       JOIN contacts c ON c.id = cv.contact_id
+       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}
+       ORDER BY s.created_at DESC, s.id DESC
+       LIMIT ${limit} OFFSET ${offset}`, params),
     q(`WITH seq AS (
-         SELECT direction, LAG(direction) OVER w AS prev_dir
+         SELECT conversation_id, direction, text,
+                LAG(direction) OVER w AS prev_dir,
+                LAG(text)      OVER w AS prev_text
          FROM messages WHERE created_at >= $1
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at, id))
-       SELECT count(*)::int AS n FROM seq WHERE direction='out' AND prev_dir='in'`, [from])
+       SELECT count(*)::int AS n
+       FROM seq s
+       JOIN conversations cv ON cv.id = s.conversation_id
+       JOIN contacts c ON c.id = cv.contact_id
+       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}`, params)
   ]);
 
   const total = totalR.rows[0] ? totalR.rows[0].n : 0;
@@ -183,6 +200,8 @@ app.get('/api/messages', wrap(async (req, res) => {
     items: rows.rows.map(m => ({
       id: String(m.id),
       conversationId: String(m.conversation_id),
+      phone: m.phone || null,
+      name: m.name || null,
       inText: trunc(m.in_text, 240),
       inType: m.in_type || 'text',
       inAt: m.in_at,

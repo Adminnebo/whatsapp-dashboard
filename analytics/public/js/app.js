@@ -4,7 +4,7 @@
   const cssvar = n => getComputedStyle(document.body).getPropertyValue(n).trim();
   const colors = () => ({ received: cssvar('--received'), sent: cssvar('--sent') });
   let current = null, days = 30;
-  let msgPage = 1, msgData = null;
+  let msgPage = 1, msgData = null, msgSearch = '';
 
   const fmtNum = n => (Number(n) || 0).toLocaleString('es-MX');
   const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -103,10 +103,11 @@
     const d = msgData; if (!d) return;
     const body = $('#msgsBody');
     if (!d.items.length) {
-      body.innerHTML = `<tr><td colspan="6" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="7" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
     } else {
       body.innerHTML = d.items.map(m => `<tr>
         <td class="nowrap">${fmtDateTime(m.inAt || m.outAt)}</td>
+        <td class="nowrap">${m.phone ? escapeHtml(m.phone) : '<span class="dim">—</span>'}${m.name ? `<div class="msgs__name">${escapeHtml(m.name)}</div>` : ''}</td>
         <td class="msgs__in"><span class="msgs__text">${msgCell(m.inText, m.inType)}</span></td>
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
         <td class="num">${m.execSecs != null ? fmtExec(m.execSecs) : '<span class="dim">—</span>'}</td>
@@ -134,11 +135,12 @@
   async function loadMessages() {
     try {
       const params = new URLSearchParams({ days: String(days), page: String(msgPage), limit: '50' });
+      if (msgSearch) params.set('search', msgSearch);
       const res = await fetch('/api/messages?' + params.toString());
       msgData = await res.json();
       renderMessages();
     } catch (e) {
-      $('#msgsBody').innerHTML = `<tr><td colspan="6" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
+      $('#msgsBody').innerHTML = `<tr><td colspan="7" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
     }
   }
 
@@ -176,6 +178,12 @@
       msgPage += b.dataset.pg === 'next' ? 1 : -1;
       if (msgPage < 1) msgPage = 1;
       loadMessages();
+    });
+    let searchTimer = null;
+    $('#msgSearch').addEventListener('input', e => {
+      const v = e.target.value.trim();
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { msgSearch = v; msgPage = 1; loadMessages(); }, 350);
     });
     $('#btnRefresh').addEventListener('click', () => { load(); loadMessages(); });
     $('#btnTheme').addEventListener('click', () => {
