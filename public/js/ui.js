@@ -205,6 +205,7 @@
       const hasMedia = !!m.mediaUrl;
       const node = el('div', 'msg ' + (out ? 'msg--out' : 'msg--in') + (m.type === 'template' ? ' msg--template' : '') + (hasMedia ? ' msg--media' : '') + (m.status === 'failed' ? ' msg--failed' : ''));
       let inner = '';
+      if (out && m.sentBy) inner += `<div class="msg__sender">${esc(m.sentBy)}</div>`;
       if (m.type === 'template') inner += `<div class="msg__tplflag">Plantilla · ${esc(m.template || '')}</div>`;
       if (hasMedia) inner += this.mediaNode(m);
       if (m.text) inner += `<div class="msg__text">${esc(m.text)}</div>`;

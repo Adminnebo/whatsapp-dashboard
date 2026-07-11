@@ -29,7 +29,13 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 
 // ── Autenticación (Supabase) — módulo reutilizable en auth/ ──────────────────
 const authRouter = require('./auth/router');
 const { requireAuth, requireAdmin } = require('./auth/middleware');
-const { configured: authConfigured } = require('./auth/supabase');
+const { configured: authConfigured, getProfile } = require('./auth/supabase');
+// Nombre del agente logueado (para sent_by). Null si no hay sesión.
+async function agentName(req) {
+  if (!req.user) return null;
+  try { const p = await getProfile(req.user.id); return (p && p.full_name) || req.user.email || null; }
+  catch (_) { return req.user.email || null; }
+}
 app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup']);
@@ -74,6 +80,7 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS label TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS charged_usd NUMERIC(12,6);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sent_by TEXT;
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_conv_contact ON conversations(contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
@@ -127,7 +134,9 @@ function normalize(body, file, direction) {
     name: body.name || null, text, wamid: body.wamid || null, ts, type,
     direction, status: body.status || (direction === 'in' ? 'received' : 'sent'),
     phone, channel: ch, mediaUrl, mediaMime, mediaName, preview, mediaData, executionMs: execMs, label, model, costUsd,
-    chargedUsd: direction === 'out' ? CLIENT_CHARGE_OUT : null
+    chargedUsd: direction === 'out' ? CLIENT_CHARGE_OUT : null,
+    // Quién envió el saliente: nombre del agente logueado o el que mande quien llama (p.ej. "Camila" desde n8n).
+    sentBy: body.sentBy != null && String(body.sentBy).trim() !== '' ? String(body.sentBy).trim() : null
   };
 }
 
@@ -141,12 +150,12 @@ conv AS (INSERT INTO conversations (contact_id, channel, last_message, last_mess
   ON CONFLICT (contact_id) DO UPDATE SET channel=EXCLUDED.channel, last_message=EXCLUDED.last_message, last_message_at=EXCLUDED.last_message_at, last_direction=EXCLUDED.last_direction, last_status=EXCLUDED.last_status,
     last_inbound=CASE WHEN EXCLUDED.last_direction='in' THEN EXCLUDED.last_message_at ELSE conversations.last_inbound END,
     unread_count=CASE WHEN EXCLUDED.last_direction='in' THEN conversations.unread_count+1 ELSE conversations.unread_count END, status='open', updated_at=now() RETURNING id)
-INSERT INTO messages (conversation_id, wamid, direction, type, text, status, channel, media_url, media_mime, media_filename, media_data, created_at, execution_ms, label, model, cost_usd, charged_usd)
-  SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17, $18, $19, $20 FROM conv
+INSERT INTO messages (conversation_id, wamid, direction, type, text, status, channel, media_url, media_mime, media_filename, media_data, created_at, execution_ms, label, model, cost_usd, charged_usd, sent_by)
+  SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17, $18, $19, $20, $21 FROM conv
   ON CONFLICT (wamid) DO NOTHING RETURNING id, conversation_id;`;
 
 async function saveMessage(n) {
-  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null];
+  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null];
   const r = await q(SAVE_SQL, params);
   const row = r.rows[0] || {};
   return { id: row.id != null ? String(row.id) : null, conversationId: row.conversation_id != null ? String(row.conversation_id) : null };
@@ -181,7 +190,7 @@ app.get('/api/messages', wrap(async (req, res) => {
   if (!id) return res.json({ messages: [] });
   const r = await q(`WITH r AS (UPDATE conversations SET unread_count=0 WHERE id=$1::bigint RETURNING id)
     SELECT id, conversation_id, direction, type, text, template, media_url, media_mime, media_filename,
-      (media_data IS NOT NULL) AS has_blob, status, channel, EXTRACT(EPOCH FROM created_at)*1000 AS timestamp
+      (media_data IS NOT NULL) AS has_blob, status, channel, sent_by, EXTRACT(EPOCH FROM created_at)*1000 AS timestamp
       FROM messages WHERE conversation_id=$1::bigint ORDER BY created_at ASC`, [id]);
   const base = originOf(req);
   const messages = r.rows.map(m => {
@@ -190,7 +199,8 @@ app.get('/api/messages', wrap(async (req, res) => {
     return {
       id: String(m.id), conversationId: String(m.conversation_id), direction: m.direction, type: m.type || 'text',
       text: m.text || '', template: m.template || null, mediaUrl, mediaMime: m.media_mime || null,
-      mediaFilename: m.media_filename || null, timestamp: Number(m.timestamp) || 0, status: m.status || 'received', channel: m.channel || 'whatsapp'
+      mediaFilename: m.media_filename || null, timestamp: Number(m.timestamp) || 0, status: m.status || 'received', channel: m.channel || 'whatsapp',
+      sentBy: m.sent_by || null
     };
   });
   res.json({ messages });
@@ -208,7 +218,11 @@ app.get('/api/media', wrap(async (req, res) => {
 }));
 
 app.post('/api/save-in', upload.single('file'), wrap(async (req, res) => { res.json({ ok: true, ...(await saveMessage(normalize(req.body || {}, req.file, 'in'))) }); }));
-app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => { res.json({ ok: true, ...(await saveMessage(normalize(req.body || {}, req.file, 'out'))) }); }));
+app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
+  const n = normalize(req.body || {}, req.file, 'out');
+  if (!n.sentBy) n.sentBy = process.env.BOT_NAME || 'Camila';   // por defecto, el bot es Camila
+  res.json({ ok: true, ...(await saveMessage(n)) });
+}));
 
 // Actualiza modelo/coste/tiempo de un mensaje YA guardado, por wamid. Lo usa el
 // workflow de "costo IA" que corre DESPUÉS de terminar la ejecución (cuando el
@@ -341,13 +355,16 @@ app.post('/api/send', wrap(async (req, res) => {
     const r = await waSend({ messaging_product: 'whatsapp', to, type: 'text', text: { body: b.text || '' } });
     wamid = r.json && r.json.messages && r.json.messages[0] ? r.json.messages[0].id : null; sent = !!wamid;
   }
-  const saved = await saveMessage(normalize({ ...b, wamid, type: 'text' }, null, 'out'));
+  const n = normalize({ ...b, wamid, type: 'text' }, null, 'out');
+  n.sentBy = await agentName(req);   // quién lo envió (agente logueado)
+  const saved = await saveMessage(n);
   res.json({ id: saved.id, conversationId: saved.conversationId, status: sent ? 'sent' : 'failed', wamid, sent });
 }));
 
 app.post('/api/send-media', upload.single('file'), wrap(async (req, res) => {
   const b = req.body || {};
   const n = normalize(b, req.file, 'out');
+  n.sentBy = await agentName(req);   // quién lo envió (agente logueado)
   const saved = await saveMessage(n);
   const to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
   let wamid = null, sent = false;

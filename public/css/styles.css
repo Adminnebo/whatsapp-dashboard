@@ -249,6 +249,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .msg--in  { align-self: flex-start; background: var(--in-bubble); border-top-left-radius: 2px; }
 .msg--out { align-self: flex-end; background: var(--wa-bubble); border-top-right-radius: 2px; }
 .msg__text { white-space: pre-wrap; }
+.msg__sender { font-size: 11px; font-weight: 700; color: var(--brand); margin-bottom: 2px; opacity: .9; }
 .msg__meta { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-top: 2px; }
 .msg__time { font-size: 10.5px; color: var(--text-mute); }
 .msg__tick { width: 16px; height: 16px; color: var(--text-mute); }
