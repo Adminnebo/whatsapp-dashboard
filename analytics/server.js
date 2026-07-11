@@ -96,9 +96,9 @@ app.get('/api/stats', wrap(async (req, res) => {
        FROM messages WHERE created_at >= $1 GROUP BY 1 ORDER BY 1`, [from, TZ]),
     q(`SELECT COALESCE(type,'text') AS type, count(*)::int AS n
        FROM messages WHERE created_at >= $1 AND direction='out' GROUP BY 1 ORDER BY 2 DESC`, [from]),
-    q(`SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY execution_ms) AS median_ms,
-              avg(execution_ms) AS avg_ms,
-              percentile_cont(0.9) WITHIN GROUP (ORDER BY execution_ms) AS p90_ms,
+    q(`SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY execution_ms) AS median_secs,
+              avg(execution_ms) AS avg_secs,
+              percentile_cont(0.9) WITHIN GROUP (ORDER BY execution_ms) AS p90_secs,
               count(*) AS n
        FROM messages WHERE created_at >= $1 AND execution_ms IS NOT NULL`, [from]),
     quotesStat(from)
@@ -125,9 +125,9 @@ app.get('/api/stats', wrap(async (req, res) => {
       samples: Number(r.n) || 0
     },
     execTime: {
-      medianMs: e.median_ms != null ? Number(e.median_ms) : null,
-      avgMs: e.avg_ms != null ? Number(e.avg_ms) : null,
-      p90Ms: e.p90_ms != null ? Number(e.p90_ms) : null,
+      medianSecs: e.median_secs != null ? Number(e.median_secs) : null,
+      avgSecs: e.avg_secs != null ? Number(e.avg_secs) : null,
+      p90Secs: e.p90_secs != null ? Number(e.p90_secs) : null,
       samples: Number(e.n) || 0
     },
     byDay: byDay.rows.map(x => ({ day: x.day, sent: Number(x.sent) || 0, received: Number(x.received) || 0 })),
@@ -191,7 +191,7 @@ app.get('/api/messages', wrap(async (req, res) => {
       outAt: m.out_at,
       status: m.status || '',
       responseSecs: m.response_secs != null ? Number(m.response_secs) : null,
-      execMs: m.execution_ms != null ? Number(m.execution_ms) : null,
+      execSecs: m.execution_ms != null ? Number(m.execution_ms) : null,
       cost: MSG_COST_OUT
     }))
   });
