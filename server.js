@@ -193,6 +193,26 @@ app.get('/api/media', wrap(async (req, res) => {
 app.post('/api/save-in', upload.single('file'), wrap(async (req, res) => { res.json({ ok: true, ...(await saveMessage(normalize(req.body || {}, req.file, 'in'))) }); }));
 app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => { res.json({ ok: true, ...(await saveMessage(normalize(req.body || {}, req.file, 'out'))) }); }));
 
+// Actualiza modelo/coste/tiempo de un mensaje YA guardado, por wamid. Lo usa el
+// workflow de "costo IA" que corre DESPUÉS de terminar la ejecución (cuando el
+// runData de n8n ya está completo y se pueden leer los tokens). Solo escribe los
+// campos que llegan (COALESCE), así no borra lo ya guardado.
+app.post('/api/message-cost', wrap(async (req, res) => {
+  const b = req.body || {};
+  const wamid = b.wamid ? String(b.wamid) : null;
+  if (!wamid) return res.status(400).json({ ok: false, error: 'wamid requerido' });
+  const model = b.model != null && String(b.model).trim() !== '' ? String(b.model).trim() : null;
+  let costUsd = b.costUsd ?? b.cost_usd; costUsd = (costUsd === '' || costUsd == null) ? null : Number(costUsd);
+  if (!Number.isFinite(costUsd)) costUsd = null;
+  let execMs = b.executionMs ?? b.execution_ms; execMs = (execMs === '' || execMs == null) ? null : Math.round(Number(execMs));
+  if (!Number.isFinite(execMs)) execMs = null;
+  const r = await q(
+    `UPDATE messages SET model = COALESCE($2, model), cost_usd = COALESCE($3, cost_usd),
+        execution_ms = COALESCE($4, execution_ms)
+     WHERE wamid = $1 RETURNING id`, [wamid, model, costUsd, execMs]);
+  res.json({ ok: true, updated: r.rowCount });
+}));
+
 app.post('/api/delete-conversation', wrap(async (req, res) => {
   const id = String((req.body && req.body.conversationId) || '').replace(/[^0-9]/g, '');
   const r = await q(`DELETE FROM conversations WHERE id=(NULLIF($1,''))::bigint RETURNING id`, [id]);
