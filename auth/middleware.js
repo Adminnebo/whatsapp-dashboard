@@ -43,10 +43,21 @@ async function requireAdmin(req, res, next) {
   try {
     if (!req.user) return res.status(401).json({ error: 'No autenticado' });
     const prof = await getProfile(req.user.id);
-    if (!prof || prof.role !== 'admin') return res.status(403).json({ error: 'Solo administradores' });
+    if (!prof || !['admin', 'super_admin'].includes(prof.role)) return res.status(403).json({ error: 'Solo administradores' });
     req.profile = prof;
     next();
   } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
 }
 
-module.exports = { requireAuth, requireAdmin, verify };
+// Solo super_admin (p.ej. para ver costes reales de IA). Se asigna solo por API.
+async function requireSuperAdmin(req, res, next) {
+  try {
+    if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+    const prof = await getProfile(req.user.id);
+    if (!prof || prof.role !== 'super_admin') return res.status(403).json({ error: 'Solo super admin' });
+    req.profile = prof;
+    next();
+  } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
+}
+
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, verify };
