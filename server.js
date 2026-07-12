@@ -95,7 +95,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT now());
 INSERT INTO app_settings (key, value) VALUES ('bot_enabled', 'true') ON CONFLICT (key) DO NOTHING;
 CREATE TABLE IF NOT EXISTS action_logs (id BIGSERIAL PRIMARY KEY, action TEXT, actor_name TEXT, actor_email TEXT, contact_id TEXT, detail TEXT, created_at TIMESTAMPTZ DEFAULT now());
+ALTER TABLE action_logs ADD COLUMN IF NOT EXISTS ref_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_action_logs_created ON action_logs(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_action_logs_ref ON action_logs(action, ref_id);
 `;
 async function migrate() { await q(MIGRATIONS); }
 
@@ -413,4 +415,40 @@ app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.h
 
 // ---- arranque ----
 migrate().then(() => console.log('[db] migraciones OK')).catch(e => console.error('[db] migración falló:', e.message));
+// ── Alerta: entrante sin respuesta tras N minutos ─────────────────────────────
+// Revisa el ÚLTIMO entrante de cada conversación; si lleva más de NO_REPLY_MINUTES
+// sin ningún saliente posterior, deja un registro. El índice único (action, ref_id)
+// garantiza una sola alerta por mensaje, aunque el escáner corra muchas veces.
+const NO_REPLY_MIN = Number(process.env.NO_REPLY_MINUTES || 10);
+async function scanNoReply() {
+  try {
+    const r = await q(`
+      WITH last_in AS (
+        SELECT DISTINCT ON (conversation_id) id, conversation_id, created_at
+        FROM messages
+        WHERE direction='in' AND created_at > now() - interval '24 hours'
+        ORDER BY conversation_id, created_at DESC
+      ),
+      pending AS (
+        SELECT li.id, li.created_at, c.ghl_contact_id
+        FROM last_in li
+        JOIN conversations cv ON cv.id = li.conversation_id
+        JOIN contacts c ON c.id = cv.contact_id
+        WHERE li.created_at < now() - make_interval(mins => $1::int)
+          AND NOT EXISTS (
+            SELECT 1 FROM messages o
+            WHERE o.conversation_id = li.conversation_id AND o.direction = 'out' AND o.created_at > li.created_at)
+      )
+      INSERT INTO action_logs (action, contact_id, detail, ref_id)
+      SELECT 'no_reply', p.ghl_contact_id,
+             'Entrante sin respuesta tras ' || $1 || ' min',
+             p.id::text
+      FROM pending p
+      ON CONFLICT (action, ref_id) DO NOTHING`, [NO_REPLY_MIN]);
+    if (r.rowCount) console.log('[no-reply] nuevas alertas:', r.rowCount);
+  } catch (e) { console.error('scanNoReply', e.message); }
+}
+setInterval(scanNoReply, 2 * 60 * 1000);   // cada 2 minutos
+setTimeout(scanNoReply, 15 * 1000);        // primera pasada al arrancar
+
 app.listen(PORT, () => console.log(`Dashboard escuchando en :${PORT}`));

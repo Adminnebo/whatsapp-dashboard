@@ -7,7 +7,7 @@
   let customFrom = null, customTo = null;
   let msgPage = 1, msgData = null, msgSearch = '', msgSender = 'all';
   let logsPage = 1, logsData = null;
-  const ACTION_LABEL = { bot_off: '🔴 Apagó el bot', bot_on: '🟢 Encendió el bot', conv_close: '🔒 Cerró conversación', conv_open: '🔓 Abrió conversación', conv_delete: '🗑️ Eliminó conversación' };
+  const ACTION_LABEL = { bot_off: '🔴 Apagó el bot', bot_on: '🟢 Encendió el bot', conv_close: '🔒 Cerró conversación', conv_open: '🔓 Abrió conversación', conv_delete: '🗑️ Eliminó conversación', no_reply: '⏰ Entrante sin respuesta' };
 
   // Construye los parámetros de rango: fechas específicas o preset de días.
   function rangeParams() {
