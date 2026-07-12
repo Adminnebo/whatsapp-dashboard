@@ -36,6 +36,14 @@ async function agentName(req) {
   try { const p = await getProfile(req.user.id); return (p && p.full_name) || req.user.email || null; }
   catch (_) { return req.user.email || null; }
 }
+// Registra una acción de la interfaz (apagar bot, cerrar conversación, eliminar).
+async function logAction(req, action, contactId, detail) {
+  try {
+    const name = await agentName(req);
+    await q(`INSERT INTO action_logs (action, actor_name, actor_email, contact_id, detail) VALUES ($1,$2,$3,$4,$5)`,
+      [action, name, req.user ? req.user.email : null, contactId || null, detail || null]);
+  } catch (e) { console.error('logAction', e.message); }
+}
 app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup']);
@@ -86,6 +94,8 @@ CREATE INDEX IF NOT EXISTS idx_conv_contact ON conversations(contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT now());
 INSERT INTO app_settings (key, value) VALUES ('bot_enabled', 'true') ON CONFLICT (key) DO NOTHING;
+CREATE TABLE IF NOT EXISTS action_logs (id BIGSERIAL PRIMARY KEY, action TEXT, actor_name TEXT, actor_email TEXT, contact_id TEXT, detail TEXT, created_at TIMESTAMPTZ DEFAULT now());
+CREATE INDEX IF NOT EXISTS idx_action_logs_created ON action_logs(created_at DESC);
 `;
 async function migrate() { await q(MIGRATIONS); }
 
@@ -246,8 +256,11 @@ app.post('/api/message-cost', wrap(async (req, res) => {
 
 app.post('/api/delete-conversation', wrap(async (req, res) => {
   const id = String((req.body && req.body.conversationId) || '').replace(/[^0-9]/g, '');
+  const cr = await q(`SELECT c.ghl_contact_id FROM conversations cv JOIN contacts c ON c.id=cv.contact_id WHERE cv.id=(NULLIF($1,''))::bigint`, [id]);
+  const cid = cr.rows[0] ? cr.rows[0].ghl_contact_id : null;
   const r = await q(`DELETE FROM conversations WHERE id=(NULLIF($1,''))::bigint RETURNING id`, [id]);
   const row = r.rows[0];
+  if (row) await logAction(req, 'conv_delete', cid, 'Eliminó la conversación');
   res.json({ ok: true, deleted: !!row, id: row ? String(row.id) : null });
 }));
 
@@ -258,6 +271,7 @@ app.get('/api/bot-enabled', wrap(async (_req, res) => res.json({ enabled: await 
 app.post('/api/bot-set', wrap(async (req, res) => {
   const val = asBool(req.body && req.body.active) ? 'true' : 'false';
   await q(`INSERT INTO app_settings (key,value,updated_at) VALUES ('bot_enabled',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [val]);
+  await logAction(req, val === 'true' ? 'bot_on' : 'bot_off', null, val === 'true' ? 'Encendió el bot' : 'Apagó el bot');
   res.json({ ok: true, active: val === 'true' });
 }));
 
@@ -336,6 +350,8 @@ app.post('/api/ghl-set-field', wrap(async (req, res) => {
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
   if (!contactId) return res.json({ ok: false });
   const { json } = await ghl('/contacts/' + encodeURIComponent(contactId), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customFields: [{ id: BOT_STATUS_FIELD, value }] }) });
+  const closed = String(value).toUpperCase() === 'STOP';
+  await logAction(req, closed ? 'conv_close' : 'conv_open', contactId, closed ? 'Cerró la conversación' : 'Abrió la conversación');
   res.json({ ok: !!(json && json.contact && json.contact.id), contactId: json && json.contact ? json.contact.id : null });
 }));
 

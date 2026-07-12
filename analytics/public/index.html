@@ -41,6 +41,7 @@
   <nav class="tabs" id="tabs" role="tablist" aria-label="Vistas">
     <button class="tab tab--active" data-tab="resumen" role="tab">📈 Resumen</button>
     <button class="tab" data-tab="mensajes" role="tab">💬 Mensajes</button>
+    <button class="tab" data-tab="registros" role="tab">📋 Registros</button>
   </nav>
 
   <main class="wrap" id="main">
@@ -106,6 +107,23 @@
         </div>
         <div class="pager" id="msgsPager"></div>
         <p class="card__note" id="msgsNote"></p>
+      </section>
+    </div>
+
+    <!-- Pestaña: Registros (acciones de la interfaz) -->
+    <div class="tabpanel" id="tabRegistros" hidden>
+      <section class="card card--wide">
+        <div class="card__head"><h2>Registro de acciones</h2></div>
+        <div class="tablewrap">
+          <table class="msgs">
+            <thead>
+              <tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Contacto</th><th>Detalle</th></tr>
+            </thead>
+            <tbody id="logsBody"><tr><td colspan="5" class="msgs__empty">Cargando…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pager" id="logsPager"></div>
+        <p class="card__note">Quién apagó el bot, cerró o eliminó una conversación desde la interfaz, con fecha, hora y contacto.</p>
       </section>
     </div>
   </main>

@@ -265,6 +265,32 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
   });
 }));
 
+// Registro de acciones de la interfaz (apagar bot, cerrar/eliminar conversación).
+app.get('/api/logs', optionalAuth, wrap(async (req, res) => {
+  const { from, to } = rangeOf(req);
+  const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 50));
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const offset = (page - 1) * limit;
+  const [rows, totalR] = await Promise.all([
+    q(`SELECT l.id, l.action, l.actor_name, l.actor_email, l.contact_id, l.detail, l.created_at,
+              c.name AS contact_name, c.phone
+       FROM action_logs l LEFT JOIN contacts c ON c.ghl_contact_id = l.contact_id
+       WHERE l.created_at >= $1 AND l.created_at < $2
+       ORDER BY l.created_at DESC LIMIT ${limit} OFFSET ${offset}`, [from, to]),
+    q(`SELECT count(*)::int AS n FROM action_logs WHERE created_at >= $1 AND created_at < $2`, [from, to])
+  ]);
+  const total = totalR.rows[0] ? totalR.rows[0].n : 0;
+  res.json({
+    page, limit, total,
+    items: rows.rows.map(l => ({
+      id: String(l.id), action: l.action || '',
+      actor: l.actor_name || l.actor_email || null,
+      contact: l.contact_name || l.phone || l.contact_id || null,
+      detail: l.detail || null, at: l.created_at
+    }))
+  });
+}));
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 

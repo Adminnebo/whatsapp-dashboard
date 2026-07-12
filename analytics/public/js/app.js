@@ -6,6 +6,8 @@
   let current = null, days = 30;
   let customFrom = null, customTo = null;
   let msgPage = 1, msgData = null, msgSearch = '', msgSender = 'all';
+  let logsPage = 1, logsData = null;
+  const ACTION_LABEL = { bot_off: '🔴 Apagó el bot', bot_on: '🟢 Encendió el bot', conv_close: '🔒 Cerró conversación', conv_open: '🔓 Abrió conversación', conv_delete: '🗑️ Eliminó conversación' };
 
   // Construye los parámetros de rango: fechas específicas o preset de días.
   function rangeParams() {
@@ -210,11 +212,43 @@
     }
   }
 
+  function renderLogs() {
+    const d = logsData; if (!d) return;
+    const body = $('#logsBody');
+    if (!d.items.length) body.innerHTML = '<tr><td colspan="5" class="msgs__empty">Sin acciones en el rango.</td></tr>';
+    else body.innerHTML = d.items.map(l => `<tr>
+      <td class="nowrap">${fmtDateTime(l.at)}</td>
+      <td class="nowrap">${l.actor ? '👤 ' + escapeHtml(l.actor) : '<span class="dim">—</span>'}</td>
+      <td class="nowrap">${ACTION_LABEL[l.action] || escapeHtml(l.action)}</td>
+      <td class="nowrap">${l.contact ? escapeHtml(l.contact) : '<span class="dim">—</span>'}</td>
+      <td class="dim">${l.detail ? escapeHtml(l.detail) : '—'}</td>
+    </tr>`).join('');
+    const pages = Math.max(1, Math.ceil(d.total / d.limit));
+    const first = d.total ? (d.page - 1) * d.limit + 1 : 0;
+    const last = Math.min(d.page * d.limit, d.total);
+    $('#logsPager').innerHTML = `
+      <span>${fmtNum(first)}–${fmtNum(last)} de ${fmtNum(d.total)} acciones</span>
+      <div class="pager__btns">
+        <button class="pgbtn" data-pg="prev" ${d.page <= 1 ? 'disabled' : ''}>← Anterior</button>
+        <span class="pager__n">Pág. ${d.page} / ${pages}</span>
+        <button class="pgbtn" data-pg="next" ${d.page >= pages ? 'disabled' : ''}>Siguiente →</button>
+      </div>`;
+  }
+  async function loadLogs() {
+    try {
+      const params = rangeParams(); params.set('page', String(logsPage)); params.set('limit', '50');
+      const res = await fetch('/api/logs?' + params.toString(), { headers: authHeaders() });
+      logsData = await res.json();
+      renderLogs();
+    } catch (e) { $('#logsBody').innerHTML = `<tr><td colspan="5" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`; }
+  }
+
   async function load() {
     try {
       const res = await fetch('/api/stats?' + rangeParams().toString(), { headers: authHeaders() });
       current = await res.json();
       render();
+      loadLogs();
     } catch (e) { $('#kpis').innerHTML = `<div class="kpi kpi--muted"><div class="kpi__value">Error</div><div class="kpi__sub">${e.message}</div></div>`; }
   }
 
@@ -257,6 +291,14 @@
       const t = b.dataset.tab;
       $('#tabResumen').hidden = t !== 'resumen';
       $('#tabMensajes').hidden = t !== 'mensajes';
+      $('#tabRegistros').hidden = t !== 'registros';
+      if (t === 'registros') { logsPage = 1; loadLogs(); }
+    });
+    $('#logsPager').addEventListener('click', e => {
+      const b = e.target.closest('.pgbtn'); if (!b || b.disabled) return;
+      logsPage += b.dataset.pg === 'next' ? 1 : -1;
+      if (logsPage < 1) logsPage = 1;
+      loadLogs();
     });
     $('#msgsPager').addEventListener('click', e => {
       const b = e.target.closest('.pgbtn'); if (!b || b.disabled) return;
