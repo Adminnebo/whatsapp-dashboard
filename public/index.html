@@ -6,7 +6,7 @@
   <title>Conversaciones · WhatsApp Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=20" />
+  <link rel="stylesheet" href="css/styles.css?v=21" />
 </head>
 <body>
   <!-- ============ APP SHELL ============ -->
@@ -44,6 +44,22 @@
         <div class="list__title-row">
           <h1>Conversaciones</h1>
           <div class="list__title-actions">
+            <div class="notif" id="notifWrap">
+              <button id="notifBtn" class="notif__btn" title="Notificaciones" aria-label="Notificaciones">
+                <svg viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5a6 6 0 0 0-5-5.91V4a1 1 0 0 0-2 0v1.09A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+                <span class="notif__count" id="notifCount" hidden>0</span>
+              </button>
+              <div class="notif__panel" id="notifPanel" hidden>
+                <div class="notif__head">
+                  <span>Notificaciones</span>
+                  <button class="notif__readall" id="notifReadAll">Marcar todas leídas</button>
+                </div>
+                <div class="notif__list" id="notifList"></div>
+                <div class="notif__foot" id="notifFoot" hidden>
+                  <button class="notif__perm" id="notifPerm">🔔 Activar avisos del navegador</button>
+                </div>
+              </div>
+            </div>
             <button id="botToggle" class="bot-toggle" title="Prender / apagar el chatbot">
               <svg viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.83 2.17-1.42 1.42A6.92 6.92 0 0 1 19 12a7 7 0 0 1-14 0 6.92 6.92 0 0 1 2.59-5.41L6.17 5.17A8.93 8.93 0 0 0 3 12a9 9 0 0 0 18 0 8.93 8.93 0 0 0-3.17-6.83z"/></svg>
               <span id="botToggleLabel">Bot</span>
@@ -88,6 +104,11 @@
             <button id="btnDelete" class="btn-icon btn-icon--danger" title="Eliminar conversación"><svg viewBox="0 0 24 24"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13H6zm4 2h1.5v9H10V9zm2.5 0H14v9h-1.5V9z"/></svg></button>
           </div>
         </header>
+
+        <div class="handoff-banner" id="handoffBanner">
+          <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+          <span><strong>Handoff activo</strong> — el bot no responderá a este contacto. Requiere atención humana.</span>
+        </div>
 
         <div class="thread__messages" id="messages"><!-- mensajes inyectados --></div>
 
@@ -268,11 +289,12 @@
 
   <!-- Scripts clásicos (compatibles con file://, sin paso de build).
        ?v= = cache-busting: súbelo cuando cambies un .js para forzar recarga. -->
-  <script src="js/config.js?v=20"></script>
-  <script src="js/store.js?v=20"></script>
-  <script src="js/api.js?v=20"></script>
-  <script src="js/ui.js?v=20"></script>
-  <script src="js/auth.js?v=20"></script>
-  <script src="js/app.js?v=20"></script>
+  <script src="js/config.js?v=21"></script>
+  <script src="js/store.js?v=21"></script>
+  <script src="js/api.js?v=21"></script>
+  <script src="js/ui.js?v=21"></script>
+  <script src="js/auth.js?v=21"></script>
+  <script src="js/notifications.js?v=21"></script>
+  <script src="js/app.js?v=21"></script>
 </body>
 </html>

@@ -195,17 +195,87 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .conv--unread .conv__name { font-weight: 700; }
 .conv--unread .conv__preview { color: var(--text); font-weight: 500; }
-/* handoff */
+/* handoff — se fija arriba y se pinta en rojo (requiere atención humana) */
 .conv__bottom .conv__preview { flex: 1; min-width: 0; }
 .conv__handoff {
   font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .3px;
-  color: #b45309; background: #fef3c7; padding: 1px 6px; border-radius: 5px; flex-shrink: 0;
+  color: #fff; background: #dc2626; padding: 1px 6px; border-radius: 5px; flex-shrink: 0;
 }
-[data-theme="dark"] .conv__handoff { background: rgba(245,158,11,.22); color: #fbbf24; }
-.conv--handoff { box-shadow: inset 3px 0 0 #f59e0b; }
+[data-theme="dark"] .conv__handoff { background: #ef4444; color: #fff; }
+.conv--handoff {
+  box-shadow: inset 4px 0 0 #dc2626;
+  background: rgba(220, 38, 38, .07);
+}
+.conv--handoff:hover { background: rgba(220, 38, 38, .12); }
+.conv--handoff.conv--active { background: rgba(220, 38, 38, .15); }
+.conv--handoff .conv__name { color: #b91c1c; font-weight: 700; }
+[data-theme="dark"] .conv--handoff { background: rgba(239, 68, 68, .12); }
+[data-theme="dark"] .conv--handoff:hover { background: rgba(239, 68, 68, .18); }
+[data-theme="dark"] .conv--handoff.conv--active { background: rgba(239, 68, 68, .22); }
+[data-theme="dark"] .conv--handoff .conv__name { color: #fca5a5; }
+.conv__pin { font-size: 11px; }
 .tab__count { font-weight: 700; }
-.tab--handoff.tab--has { color: #b45309; }
-[data-theme="dark"] .tab--handoff.tab--has { color: #fbbf24; }
+.tab--handoff.tab--has { color: #dc2626; font-weight: 700; }
+[data-theme="dark"] .tab--handoff.tab--has { color: #fca5a5; }
+
+/* aviso rojo en la cabecera del hilo cuando la conversación está en handoff */
+.handoff-banner { display: none; }
+.thread--handoff .handoff-banner {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 18px; font-size: 12.5px; color: #b91c1c;
+  background: rgba(220, 38, 38, .10); border-bottom: 1px solid rgba(220, 38, 38, .25);
+}
+.handoff-banner svg { width: 16px; height: 16px; fill: #dc2626; flex-shrink: 0; }
+[data-theme="dark"] .thread--handoff .handoff-banner { color: #fca5a5; background: rgba(239, 68, 68, .14); }
+
+/* ============ NOTIFICACIONES ============ */
+.notif { position: relative; }
+.notif__btn {
+  position: relative; display: grid; place-items: center;
+  width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--panel); color: var(--text-soft); cursor: pointer;
+}
+.notif__btn:hover { background: var(--hover); color: var(--text); }
+.notif__btn svg { width: 17px; height: 17px; fill: currentColor; }
+.notif__btn--has { color: #dc2626; border-color: rgba(220, 38, 38, .45); }
+.notif__count {
+  position: absolute; top: -5px; right: -5px;
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: #dc2626; color: #fff; font-size: 9.5px; font-weight: 800;
+  display: grid; place-items: center; box-shadow: 0 0 0 2px var(--panel);
+}
+.notif__panel {
+  position: absolute; top: 40px; right: 0; z-index: 60; width: 340px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .16); overflow: hidden;
+}
+.notif__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 11px 13px; border-bottom: 1px solid var(--border);
+  font-size: 13px; font-weight: 700; color: var(--text);
+}
+.notif__readall { border: 0; background: none; color: var(--brand); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.notif__readall:hover { text-decoration: underline; }
+.notif__list { max-height: 380px; overflow-y: auto; }
+.notif__empty { padding: 26px 14px; text-align: center; color: var(--text-soft); font-size: 13px; }
+.notif__item {
+  display: flex; gap: 10px; padding: 10px 13px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.notif__item:hover { background: var(--hover); }
+.notif__item--unread { background: rgba(47, 109, 246, .06); }
+.notif__item--unread:hover { background: rgba(47, 109, 246, .11); }
+.notif__item--handoff.notif__item--unread { background: rgba(220, 38, 38, .08); }
+.notif__item--handoff.notif__item--unread:hover { background: rgba(220, 38, 38, .13); }
+.notif__icon { font-size: 15px; line-height: 1.3; flex-shrink: 0; }
+.notif__body { min-width: 0; flex: 1; }
+.notif__title { font-size: 12.8px; font-weight: 600; color: var(--text); }
+.notif__item--unread .notif__title { font-weight: 700; }
+.notif__text { font-size: 11.8px; color: var(--text-soft); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif__time { font-size: 10.5px; color: var(--text-soft); margin-top: 3px; }
+.notif__foot { padding: 9px 13px; border-top: 1px solid var(--border); }
+.notif__perm { width: 100%; padding: 7px; border: 1px dashed var(--border); border-radius: 8px; background: none; color: var(--text-soft); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.notif__perm:hover { color: var(--text); border-color: var(--text-soft); }
 
 /* ============ AVATAR ============ */
 .avatar {

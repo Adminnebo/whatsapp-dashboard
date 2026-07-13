@@ -105,7 +105,7 @@
       list.forEach(c => {
         const active = c.id === Store.activeId;
         const cm = chMeta(c.channel);
-        const handoff = c.contactId && Store.handoffIds && Store.handoffIds.has(c.contactId);
+        const handoff = Store.isHandoff(c);
         const node = el('div', 'conv' + (active ? ' conv--active' : '') + (c.unreadCount > 0 ? ' conv--unread' : '') + (handoff ? ' conv--handoff' : ''));
         const tick = c.lastDirection === 'out' ? `<span class="tick ${c.lastStatus === 'read' ? 'read' : ''}">${TICK[c.lastStatus] || TICK.sent}</span> ` : '';
         node.innerHTML = `
@@ -115,7 +115,7 @@
           </div>
           <div class="conv__main">
             <div class="conv__top">
-              <span class="conv__name">${esc(c.name)}</span>
+              <span class="conv__name">${handoff ? '<span class="conv__pin" title="Fijada por handoff">📌</span> ' : ''}${esc(c.name)}</span>
               <span class="conv__time">${relList(c.lastMessageAt)}</span>
             </div>
             <div class="conv__bottom">
@@ -145,6 +145,9 @@
       const hcm = chMeta(conv.channel);
       const chanEl = $('#threadChan');
       if (chanEl) { chanEl.innerHTML = hcm.icon + ' ' + hcm.label; chanEl.style.color = hcm.color; }
+      // aviso rojo cuando la conversación está en handoff
+      const thread = $('#thread');
+      if (thread) thread.classList.toggle('thread--handoff', Store.isHandoff(conv));
 
       // mensajes con separadores de fecha
       const box = $('#messages');

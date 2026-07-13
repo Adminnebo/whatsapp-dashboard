@@ -81,11 +81,17 @@
       const conv = this.conversations.find(c => c.id === convId);
       if (conv) conv.unreadCount = 0;
     },
+    // ¿Está esta conversación en handoff? Vale tanto el flag que manda el servidor
+    // (contacts.handoff) como el set que refresca el poll de GHL.
+    isHandoff(c) {
+      if (!c) return false;
+      return !!c.handoff || !!(c.contactId && this.handoffIds.has(c.contactId));
+    },
     visibleConversations() {
       let list = this.conversations.slice();
       if (this.filter === 'unread')  list = list.filter(c => c.unreadCount > 0);
       if (this.filter === 'starred') list = list.filter(c => c.starred);
-      if (this.filter === 'handoff') list = list.filter(c => c.contactId && this.handoffIds.has(c.contactId));
+      if (this.filter === 'handoff') list = list.filter(c => this.isHandoff(c));
       if (this.search) {
         const q = this.search.toLowerCase();
         list = list.filter(c =>
@@ -94,7 +100,9 @@
           (c.lastMessage || '').toLowerCase().includes(q)
         );
       }
-      return list.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+      // Handoff siempre arriba (fijado); dentro de cada grupo, lo más reciente primero.
+      const h = c => (this.isHandoff(c) ? 1 : 0);
+      return list.sort((a, b) => (h(b) - h(a)) || (b.lastMessageAt - a.lastMessageAt));
     },
     saveSettings,
     loadSettings

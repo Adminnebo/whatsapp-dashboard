@@ -18,6 +18,7 @@
       this.startPolling();
       this.loadBotState();
       this.loadHandoff();
+      if (global.Notifs) global.Notifs.init();
     },
 
     // ---------- tema claro / oscuro ----------
@@ -409,7 +410,7 @@
     // firma compacta de la lista para detectar cambios reales
     convSig(list) {
       let s = '';
-      for (const c of list) s += c.id + ':' + (c.lastMessageAt || 0) + ':' + (c.unreadCount || 0) + ':' + (c.lastStatus || '') + '|';
+      for (const c of list) s += c.id + ':' + (c.lastMessageAt || 0) + ':' + (c.unreadCount || 0) + ':' + (c.lastStatus || '') + ':' + (c.handoff ? 'H' : '') + '|';
       return s;
     },
 

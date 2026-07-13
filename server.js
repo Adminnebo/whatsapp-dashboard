@@ -36,6 +36,20 @@ async function agentName(req) {
   try { const p = await getProfile(req.user.id); return (p && p.full_name) || req.user.email || null; }
   catch (_) { return req.user.email || null; }
 }
+// Crea una notificación para la app. El índice único (type, ref_id) evita duplicados
+// si el escáner corre varias veces sobre el mismo hecho. Devuelve el id o null si ya existía.
+async function notify({ type, contactId, conversationId, title, body, refId }) {
+  try {
+    const r = await q(
+      `INSERT INTO notifications (type, contact_id, conversation_id, title, body, ref_id)
+       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (type, ref_id) DO NOTHING RETURNING id`,
+      [type, contactId || null, conversationId || null, title, body || null, refId || null]);
+    return r.rows[0] ? r.rows[0].id : null;
+  } catch (e) { console.error('notify', e.message); return null; }
+}
+// Clave de lectura por usuario (para saber qué notificaciones ya vio cada uno).
+const userKey = req => (req.user && (req.user.id || req.user.email)) || 'anon';
+
 // Registra una acción de la interfaz (apagar bot, cerrar conversación, eliminar).
 async function logAction(req, action, contactId, detail) {
   try {
@@ -99,6 +113,12 @@ CREATE TABLE IF NOT EXISTS action_logs (id BIGSERIAL PRIMARY KEY, action TEXT, a
 ALTER TABLE action_logs ADD COLUMN IF NOT EXISTS ref_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_action_logs_created ON action_logs(created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_action_logs_ref ON action_logs(action, ref_id);
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff BOOLEAN DEFAULT false;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_at TIMESTAMPTZ;
+CREATE TABLE IF NOT EXISTS notifications (id BIGSERIAL PRIMARY KEY, type TEXT NOT NULL, contact_id TEXT, conversation_id BIGINT, title TEXT NOT NULL, body TEXT, ref_id TEXT, created_at TIMESTAMPTZ DEFAULT now());
+CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_ref ON notifications(type, ref_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
+CREATE TABLE IF NOT EXISTS notification_reads (notification_id BIGINT REFERENCES notifications(id) ON DELETE CASCADE, user_key TEXT, read_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (notification_id, user_key));
 `;
 async function migrate() { await q(MIGRATIONS); }
 
@@ -198,10 +218,11 @@ async function saveMessage(n) {
 app.get('/api/db-setup', wrap(async (_req, res) => { await migrate(); res.json({ ok: true, message: 'Tablas creadas correctamente.' }); }));
 
 app.get('/api/conversations', wrap(async (_req, res) => {
-  const r = await q(`SELECT conv.id, c.ghl_contact_id, c.name, c.phone, c.email, c.company, c.tags, c.source, c.owner,
+  const r = await q(`SELECT conv.id, c.ghl_contact_id, c.name, c.phone, c.email, c.company, c.tags, c.source, c.owner, c.handoff,
       conv.channel, conv.status, conv.starred, conv.unread_count, conv.last_message, conv.last_direction, conv.last_status,
       EXTRACT(EPOCH FROM conv.last_message_at)*1000 AS last_message_at, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
-      FROM conversations conv JOIN contacts c ON c.id = conv.contact_id ORDER BY conv.last_message_at DESC NULLS LAST`);
+      FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
+      ORDER BY c.handoff DESC NULLS LAST, conv.last_message_at DESC NULLS LAST`);
   const conversations = r.rows.map(row => {
     const nm = row.name || row.phone || '?';
     return {
@@ -210,7 +231,7 @@ app.get('/api/conversations', wrap(async (_req, res) => {
       lastMessage: row.last_message || '', lastMessageAt: Number(row.last_message_at) || 0,
       lastDirection: row.last_direction || 'in', lastStatus: row.last_status || 'received',
       unreadCount: Number(row.unread_count) || 0, starred: !!row.starred, status: row.status || 'open',
-      lastInbound: Number(row.last_inbound) || 0,
+      lastInbound: Number(row.last_inbound) || 0, handoff: !!row.handoff,
       contact: { email: row.email || '', company: row.company || '', tags: row.tags || [], source: row.source || '', owner: row.owner || '' }
     };
   });
@@ -250,7 +271,25 @@ app.get('/api/media', wrap(async (req, res) => {
   res.send(row.media_data);
 }));
 
-app.post('/api/save-in', upload.single('file'), wrap(async (req, res) => { res.json({ ok: true, ...(await saveMessage(normalize(req.body || {}, req.file, 'in'))) }); }));
+app.post('/api/save-in', upload.single('file'), wrap(async (req, res) => {
+  const n = normalize(req.body || {}, req.file, 'in');
+  const saved = await saveMessage(n);
+  res.json({ ok: true, ...saved });
+  // Si nadie automático va a contestar (handoff o bot apagado), avisamos en la app.
+  try {
+    if (!n.contactId) return;
+    const c = await q(`SELECT name, phone, handoff FROM contacts WHERE ghl_contact_id = $1 LIMIT 1`, [n.contactId]);
+    const row = c.rows[0]; if (!row) return;
+    const botOn = await getFlag();
+    if (!row.handoff && botOn) return;
+    await notify({
+      type: 'inbound', contactId: n.contactId, conversationId: saved.conversationId,
+      title: 'Mensaje de ' + (row.name || row.phone || 'contacto'),
+      body: (n.text || '[adjunto]').slice(0, 120) + (row.handoff ? ' — en handoff' : ' — bot apagado'),
+      refId: n.wamid || String(saved.id)
+    });
+  } catch (e) { console.error('save-in notify', e.message); }
+}));
 app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
   const n = normalize(req.body || {}, req.file, 'out');
   if (!n.sentBy) n.sentBy = process.env.BOT_NAME || 'Camila';   // por defecto, el bot es Camila
@@ -378,11 +417,48 @@ app.post('/api/ghl-set-field', wrap(async (req, res) => {
   res.json({ ok: !!(json && json.contact && json.contact.id), contactId: json && json.contact ? json.contact.id : null });
 }));
 
+// Contactos con la etiqueta handoff. Sirve del cache en DB (lo mantiene scanHandoff);
+// con ?refresh=1 fuerza una consulta a GHL antes de responder.
 app.get('/api/handoff', wrap(async (req, res) => {
-  const tag = String(req.query.tag || HANDOFF_TAG).trim();
-  const { json } = await ghl('/contacts/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locationId: LOCATION_ID, pageLimit: 100, filters: [{ field: 'tags', operator: 'contains', value: tag }] }) });
-  const contactIds = ((json && json.contacts) || []).map(c => c.id).filter(Boolean);
-  res.json({ ok: true, contactIds });
+  if (asBool(req.query.refresh)) await scanHandoff();
+  const r = await q(`SELECT ghl_contact_id FROM contacts WHERE handoff = true AND ghl_contact_id IS NOT NULL`);
+  res.json({ ok: true, contactIds: r.rows.map(x => x.ghl_contact_id) });
+}));
+
+// ---- notificaciones ----
+app.get('/api/notifications', wrap(async (req, res) => {
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 40));
+  const r = await q(
+    `SELECT n.id, n.type, n.contact_id, n.conversation_id, n.title, n.body,
+            EXTRACT(EPOCH FROM n.created_at)*1000 AS created_at,
+            (nr.notification_id IS NOT NULL) AS read
+     FROM notifications n
+     LEFT JOIN notification_reads nr ON nr.notification_id = n.id AND nr.user_key = $1
+     WHERE n.created_at > now() - interval '7 days'
+     ORDER BY n.created_at DESC LIMIT $2`, [userKey(req), limit]);
+  const items = r.rows.map(n => ({
+    id: String(n.id), type: n.type, contactId: n.contact_id || null,
+    conversationId: n.conversation_id != null ? String(n.conversation_id) : null,
+    title: n.title, body: n.body || '', createdAt: Number(n.created_at) || 0, read: !!n.read
+  }));
+  res.json({ ok: true, items, unread: items.filter(i => !i.read).length });
+}));
+
+app.post('/api/notifications/read', wrap(async (req, res) => {
+  const uk = userKey(req);
+  const b = req.body || {};
+  if (asBool(b.all)) {
+    await q(`INSERT INTO notification_reads (notification_id, user_key)
+             SELECT id, $1 FROM notifications WHERE created_at > now() - interval '7 days'
+             ON CONFLICT DO NOTHING`, [uk]);
+  } else {
+    const ids = (Array.isArray(b.ids) ? b.ids : []).map(Number).filter(n => Number.isFinite(n) && n > 0);
+    if (ids.length) {
+      await q(`INSERT INTO notification_reads (notification_id, user_key)
+               SELECT unnest($2::bigint[]), $1 ON CONFLICT DO NOTHING`, [uk, ids]);
+    }
+  }
+  res.json({ ok: true });
 }));
 
 // ---- envío por WhatsApp ----
@@ -465,11 +541,61 @@ async function scanNoReply() {
              'Entrante sin respuesta tras ' || $1 || ' min',
              p.id::text
       FROM pending p
-      ON CONFLICT (action, ref_id) DO NOTHING`, [NO_REPLY_MIN]);
+      ON CONFLICT (action, ref_id) DO NOTHING
+      RETURNING contact_id, ref_id`, [NO_REPLY_MIN]);
     if (r.rowCount) console.log('[no-reply] nuevas alertas:', r.rowCount);
+    // Cada alerta nueva genera además una notificación en la app.
+    for (const row of r.rows) {
+      const who = await q(
+        `SELECT cv.id AS conv_id, ct.name, ct.phone FROM contacts ct
+         LEFT JOIN conversations cv ON cv.contact_id = ct.id WHERE ct.ghl_contact_id = $1 LIMIT 1`, [row.contact_id]);
+      const c = who.rows[0] || {};
+      await notify({
+        type: 'no_reply', contactId: row.contact_id, conversationId: c.conv_id || null,
+        title: 'Sin respuesta: ' + (c.name || c.phone || 'contacto'),
+        body: `Lleva más de ${NO_REPLY_MIN} min sin recibir respuesta`, refId: row.ref_id
+      });
+    }
   } catch (e) { console.error('scanNoReply', e.message); }
 }
 setInterval(scanNoReply, 2 * 60 * 1000);   // cada 2 minutos
 setTimeout(scanNoReply, 15 * 1000);        // primera pasada al arrancar
+
+// ── Handoff: sincroniza la etiqueta de GHL con la DB y notifica los nuevos ────
+// Guarda el estado en contacts.handoff para que la lista pueda fijar y pintar de
+// rojo esas conversaciones sin depender de GHL en cada carga.
+async function scanHandoff() {
+  if (!GHL_PIT || !LOCATION_ID) return;
+  try {
+    const { json } = await ghl('/contacts/search', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locationId: LOCATION_ID, pageLimit: 100, filters: [{ field: 'tags', operator: 'contains', value: HANDOFF_TAG }] })
+    });
+    if (!json || !Array.isArray(json.contacts)) return;   // GHL falló: no tocamos el estado
+    const ids = json.contacts.map(c => c.id).filter(Boolean);
+
+    // Nuevos: los que tienen la etiqueta y aún no estaban marcados.
+    const nuevos = await q(
+      `UPDATE contacts SET handoff = true, handoff_at = now()
+       WHERE ghl_contact_id = ANY($1::text[]) AND handoff IS NOT TRUE
+       RETURNING id, ghl_contact_id, name, phone`, [ids]);
+    for (const c of nuevos.rows) {
+      const cv = await q(`SELECT id FROM conversations WHERE contact_id = $1 LIMIT 1`, [c.id]);
+      await notify({
+        type: 'handoff', contactId: c.ghl_contact_id, conversationId: cv.rows[0] ? cv.rows[0].id : null,
+        title: 'Handoff: ' + (c.name || c.phone || 'contacto'),
+        body: 'Pidió atención humana — el bot no responderá',
+        refId: c.ghl_contact_id + ':' + Date.now()
+      });
+    }
+    if (nuevos.rowCount) console.log('[handoff] nuevos:', nuevos.rowCount);
+
+    // Los que ya no tienen la etiqueta vuelven a la normalidad.
+    await q(`UPDATE contacts SET handoff = false, handoff_at = NULL
+             WHERE handoff = true AND NOT (ghl_contact_id = ANY($1::text[]))`, [ids]);
+  } catch (e) { console.error('scanHandoff', e.message); }
+}
+setInterval(scanHandoff, 60 * 1000);       // cada minuto
+setTimeout(scanHandoff, 5 * 1000);         // primera pasada al arrancar
 
 app.listen(PORT, () => console.log(`Dashboard escuchando en :${PORT}`));
