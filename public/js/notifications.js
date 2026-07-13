@@ -66,6 +66,7 @@
       $('#notifPerm').addEventListener('click', e => { e.stopPropagation(); this.askPermission(); });
       document.addEventListener('click', e => { if (this.open && !e.target.closest('#notifWrap')) this.close(); });
       document.addEventListener('keydown', e => { if (e.key === 'Escape' && this.open) this.close(); });
+      global.addEventListener('resize', () => { if (this.open) this.place(); });
       this.renderFoot();
       await this.load();
       this._timer = setInterval(() => this.load(), POLL_MS);
@@ -169,12 +170,30 @@
       try { await fetch('/api/notifications/read', { method: 'POST', headers: headers(), body: JSON.stringify({ all: true }) }); } catch (_) {}
     },
 
+    // El panel va en position:fixed, así que lo colocamos a mano bajo la campana.
+    // Preferimos alinearlo por la derecha; si no cabe, por la izquierda; y siempre
+    // dentro de la pantalla (con la lista en overflow:hidden, si no se recortaría).
+    place() {
+      const btn = $('#notifBtn'), panel = $('#notifPanel');
+      if (!btn || !panel) return;
+      const r = btn.getBoundingClientRect();
+      const w = panel.offsetWidth || 340;
+      const M = 10;                                   // margen mínimo con el borde
+      let left = r.right - w;                         // alineado a la derecha del botón
+      if (left < M) left = r.left;                    // no cabe: lo abrimos hacia la derecha
+      left = Math.max(M, Math.min(left, window.innerWidth - w - M));
+      panel.style.left = Math.round(left) + 'px';
+      panel.style.top = Math.round(r.bottom + 8) + 'px';
+    },
+
     toggle() { this.open ? this.close() : this.show(); },
     show() {
       this.open = true;
-      $('#notifPanel').hidden = false;
+      const panel = $('#notifPanel');
+      panel.hidden = false;
       this.renderList();
       this.renderFoot();
+      this.place();
       this.load();
     },
     close() { this.open = false; $('#notifPanel').hidden = true; }
