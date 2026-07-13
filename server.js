@@ -545,7 +545,12 @@ migrate().then(() => console.log('[db] migraciones OK')).catch(e => console.erro
 // Revisa el ÚLTIMO entrante de cada conversación; si lleva más de NO_REPLY_MINUTES
 // sin ningún saliente posterior, deja un registro. El índice único (action, ref_id)
 // garantiza una sola alerta por mensaje, aunque el escáner corra muchas veces.
-const NO_REPLY_MIN = Number(process.env.NO_REPLY_MINUTES || 10);
+// Admite decimales (1.5 = minuto y medio); internamente trabajamos en segundos.
+const NO_REPLY_MIN = Number(process.env.NO_REPLY_MINUTES || 1.5);
+const NO_REPLY_SECS = Math.max(15, Math.round(NO_REPLY_MIN * 60));
+const NO_REPLY_LABEL = NO_REPLY_SECS % 60 === 0
+  ? (NO_REPLY_SECS / 60) + ' min'
+  : Math.floor(NO_REPLY_SECS / 60) + ' min ' + (NO_REPLY_SECS % 60) + ' s';
 async function scanNoReply() {
   try {
     const r = await q(`
@@ -560,18 +565,18 @@ async function scanNoReply() {
         FROM last_in li
         JOIN conversations cv ON cv.id = li.conversation_id
         JOIN contacts c ON c.id = cv.contact_id
-        WHERE li.created_at < now() - make_interval(mins => $1::int)
+        WHERE li.created_at < now() - make_interval(secs => $1::int)
           AND NOT EXISTS (
             SELECT 1 FROM messages o
             WHERE o.conversation_id = li.conversation_id AND o.direction = 'out' AND o.created_at > li.created_at)
       )
       INSERT INTO action_logs (action, contact_id, detail, ref_id)
       SELECT 'no_reply', p.ghl_contact_id,
-             'Entrante sin respuesta tras ' || $1 || ' min',
+             'Entrante sin respuesta tras ' || $2,
              p.id::text
       FROM pending p
       ON CONFLICT (action, ref_id) DO NOTHING
-      RETURNING contact_id, ref_id`, [NO_REPLY_MIN]);
+      RETURNING contact_id, ref_id`, [NO_REPLY_SECS, NO_REPLY_LABEL]);
     if (r.rowCount) console.log('[no-reply] nuevas alertas:', r.rowCount);
     // Cada alerta nueva genera además una notificación en la app.
     for (const row of r.rows) {
@@ -582,13 +587,16 @@ async function scanNoReply() {
       await notify({
         type: 'no_reply', contactId: row.contact_id, conversationId: c.conv_id || null,
         title: 'Sin respuesta: ' + (c.name || c.phone || 'contacto'),
-        body: `Lleva más de ${NO_REPLY_MIN} min sin recibir respuesta`, refId: row.ref_id
+        body: `Lleva más de ${NO_REPLY_LABEL} sin recibir respuesta`, refId: row.ref_id
       });
     }
   } catch (e) { console.error('scanNoReply', e.message); }
 }
-setInterval(scanNoReply, 2 * 60 * 1000);   // cada 2 minutos
+// El escaneo debe ser bastante más frecuente que el umbral, si no la alerta llega tarde.
+const NO_REPLY_EVERY = Math.min(30, Math.max(10, Math.round(NO_REPLY_SECS / 3))) * 1000;
+setInterval(scanNoReply, NO_REPLY_EVERY);
 setTimeout(scanNoReply, 15 * 1000);        // primera pasada al arrancar
+console.log(`[no-reply] umbral ${NO_REPLY_LABEL} (${NO_REPLY_SECS}s), escaneo cada ${NO_REPLY_EVERY / 1000}s`);
 
 // ── Handoff: sincroniza la etiqueta de GHL con la DB y notifica los nuevos ────
 // Guarda el estado en contacts.handoff para que la lista pueda fijar y pintar de
