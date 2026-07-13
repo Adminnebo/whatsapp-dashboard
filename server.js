@@ -115,6 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_action_logs_created ON action_logs(created_at DES
 CREATE UNIQUE INDEX IF NOT EXISTS uq_action_logs_ref ON action_logs(action, ref_id);
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff BOOLEAN DEFAULT false;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_at TIMESTAMPTZ;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_stopped BOOLEAN DEFAULT false;
 CREATE TABLE IF NOT EXISTS notifications (id BIGSERIAL PRIMARY KEY, type TEXT NOT NULL, contact_id TEXT, conversation_id BIGINT, title TEXT NOT NULL, body TEXT, ref_id TEXT, created_at TIMESTAMPTZ DEFAULT now());
 CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_ref ON notifications(type, ref_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
@@ -407,6 +408,15 @@ app.get('/api/ghl-contact', wrap(async (req, res) => {
 }));
 
 const BOT_STATUS_FIELD = process.env.BOT_STATUS_FIELD_ID || 'M2ONiagYfBbAJrC9jhgO';
+// Escribe el custom field bot_status en GHL. 'STOP' = conversación cerrada (el bot
+// no responde a ESE contacto). Es el mismo campo que mueve el botón de la interfaz.
+async function setBotStatus(contactId, value) {
+  const { json } = await ghl('/contacts/' + encodeURIComponent(contactId), {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customFields: [{ id: BOT_STATUS_FIELD, value }] })
+  });
+  return !!(json && json.contact && json.contact.id);
+}
 app.post('/api/ghl-set-field', wrap(async (req, res) => {
   const contactId = String((req.body && req.body.contactId) || '').trim();
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
@@ -574,7 +584,7 @@ async function scanHandoff() {
     if (!json || !Array.isArray(json.contacts)) return;   // GHL falló: no tocamos el estado
     const ids = json.contacts.map(c => c.id).filter(Boolean);
 
-    // Nuevos: los que tienen la etiqueta y aún no estaban marcados.
+    // 1) Nuevos: los que tienen la etiqueta y aún no estaban marcados → notificación.
     const nuevos = await q(
       `UPDATE contacts SET handoff = true, handoff_at = now()
        WHERE ghl_contact_id = ANY($1::text[]) AND handoff IS NOT TRUE
@@ -584,14 +594,34 @@ async function scanHandoff() {
       await notify({
         type: 'handoff', contactId: c.ghl_contact_id, conversationId: cv.rows[0] ? cv.rows[0].id : null,
         title: 'Handoff: ' + (c.name || c.phone || 'contacto'),
-        body: 'Pidió atención humana — el bot no responderá',
+        body: 'Requiere atención humana — se apaga el bot para este contacto',
         refId: c.ghl_contact_id + ':' + Date.now()
       });
     }
     if (nuevos.rowCount) console.log('[handoff] nuevos:', nuevos.rowCount);
 
-    // Los que ya no tienen la etiqueta vuelven a la normalidad.
-    await q(`UPDATE contacts SET handoff = false, handoff_at = NULL
+    // 2) Apaga el bot PARA ESE CONTACTO (bot_status = STOP en GHL), igual que el botón
+    //    "Conversación cerrada" de la interfaz. NO toca el bot global. Si GHL falla,
+    //    handoff_stopped sigue en false y se reintenta en la siguiente pasada.
+    const pendientes = await q(
+      `SELECT ghl_contact_id, EXTRACT(EPOCH FROM handoff_at)::bigint AS since FROM contacts
+       WHERE handoff = true AND handoff_stopped IS NOT TRUE AND ghl_contact_id IS NOT NULL`);
+    for (const c of pendientes.rows) {
+      try {
+        if (!await setBotStatus(c.ghl_contact_id, 'STOP')) continue;   // reintenta al siguiente ciclo
+        await q(`UPDATE contacts SET handoff_stopped = true WHERE ghl_contact_id = $1`, [c.ghl_contact_id]);
+        await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail, ref_id)
+                 VALUES ('conv_close', 'Sistema (handoff)', $1,
+                         'Bot apagado automáticamente al recibir la etiqueta handoff', $2)
+                 ON CONFLICT (action, ref_id) DO NOTHING`,
+          [c.ghl_contact_id, 'handoff:' + c.ghl_contact_id + ':' + (c.since || 0)]);
+        console.log('[handoff] bot apagado para', c.ghl_contact_id);
+      } catch (e) { console.error('handoff setBotStatus', c.ghl_contact_id, e.message); }
+    }
+
+    // 3) Los que ya no tienen la etiqueta vuelven a la normalidad. La conversación se
+    //    queda cerrada a propósito: reabrirla es decisión del agente (botón de la app).
+    await q(`UPDATE contacts SET handoff = false, handoff_at = NULL, handoff_stopped = false
              WHERE handoff = true AND NOT (ghl_contact_id = ANY($1::text[]))`, [ids]);
   } catch (e) { console.error('scanHandoff', e.message); }
 }
