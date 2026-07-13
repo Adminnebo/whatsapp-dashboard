@@ -206,16 +206,24 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
   if (sender === 'bot') senderClause = ` AND lower(s.sent_by) = 'camila'`;
   else if (sender === 'human') senderClause = ` AND s.sent_by IS NOT NULL AND lower(s.sent_by) <> 'camila'`;
 
+  const CHANNELS = ['whatsapp', 'instagram', 'facebook', 'pagina_web'];
+  const channel = String(req.query.channel || '').trim().toLowerCase();
+  let channelClause = '';
+  if (CHANNELS.includes(channel)) {
+    params.push(channel);
+    channelClause = ` AND s.channel = $${params.length}`;
+  }
+
   const [rows, totalR] = await Promise.all([
     q(`WITH seq AS (
-         SELECT id, conversation_id, direction, type, text, status, created_at, execution_ms, model, cost_usd, charged_usd, sent_by,
+         SELECT id, conversation_id, direction, type, text, status, created_at, execution_ms, model, cost_usd, charged_usd, sent_by, channel,
                 LAG(direction)  OVER w AS prev_dir,
                 LAG(text)       OVER w AS prev_text,
                 LAG(type)       OVER w AS prev_type,
                 LAG(created_at) OVER w AS prev_at
          FROM messages WHERE created_at >= $1 AND created_at < $2
          WINDOW w AS (PARTITION BY conversation_id ORDER BY created_at, id))
-       SELECT s.id, s.conversation_id, s.created_at AS out_at, s.status, s.execution_ms, s.model, s.cost_usd, s.charged_usd, s.sent_by,
+       SELECT s.id, s.conversation_id, s.created_at AS out_at, s.status, s.execution_ms, s.model, s.cost_usd, s.charged_usd, s.sent_by, s.channel,
               s.text AS out_text, s.type AS out_type,
               s.prev_text AS in_text, s.prev_type AS in_type, s.prev_at AS in_at,
               EXTRACT(EPOCH FROM (s.created_at - s.prev_at)) AS response_secs,
@@ -223,11 +231,11 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
        FROM seq s
        JOIN conversations cv ON cv.id = s.conversation_id
        JOIN contacts c ON c.id = cv.contact_id
-       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}${senderClause}
+       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}${senderClause}${channelClause}
        ORDER BY s.created_at DESC, s.id DESC
        LIMIT ${limit} OFFSET ${offset}`, params),
     q(`WITH seq AS (
-         SELECT conversation_id, direction, text, sent_by,
+         SELECT conversation_id, direction, text, sent_by, channel,
                 LAG(direction) OVER w AS prev_dir,
                 LAG(text)      OVER w AS prev_text
          FROM messages WHERE created_at >= $1 AND created_at < $2
@@ -236,7 +244,7 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
        FROM seq s
        JOIN conversations cv ON cv.id = s.conversation_id
        JOIN contacts c ON c.id = cv.contact_id
-       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}${senderClause}`, params)
+       WHERE s.direction='out' AND s.prev_dir='in'${searchClause}${senderClause}${channelClause}`, params)
   ]);
 
   const total = totalR.rows[0] ? totalR.rows[0].n : 0;
@@ -259,6 +267,7 @@ app.get('/api/messages', optionalAuth, wrap(async (req, res) => {
       execSecs: m.execution_ms != null ? Number(m.execution_ms) : null,
       model: m.model || null,
       sentBy: m.sent_by || null,
+      channel: m.channel || 'whatsapp',
       costUsd: (canSeeCost && m.cost_usd != null) ? Number(m.cost_usd) : null,
       cost: m.charged_usd != null ? Number(m.charged_usd) : MSG_COST_OUT
     }))

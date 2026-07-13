@@ -5,7 +5,7 @@
   const colors = () => ({ received: cssvar('--received'), sent: cssvar('--sent') });
   let current = null, days = 30;
   let customFrom = null, customTo = null;
-  let msgPage = 1, msgData = null, msgSearch = '', msgSender = 'all';
+  let msgPage = 1, msgData = null, msgSearch = '', msgSender = 'all', msgChannel = '';
   let logsPage = 1, logsData = null;
   const ACTION_LABEL = { bot_off: '🔴 Apagó el bot', bot_on: '🟢 Encendió el bot', conv_close: '🔒 Cerró conversación', conv_open: '🔓 Abrió conversación', conv_delete: '🗑️ Eliminó conversación', no_reply: '⏰ Entrante sin respuesta' };
 
@@ -160,16 +160,31 @@
     return `<span class="${bot ? 'dim' : 'msgs__human'}">${bot ? '🤖' : '👤'} ${escapeHtml(name)}</span>`;
   }
 
+  const CHANNELS = {
+    whatsapp:   { label: 'WhatsApp',    icon: '💬' },
+    instagram:  { label: 'Instagram',   icon: '📸' },
+    facebook:   { label: 'Facebook',    icon: '📘' },
+    pagina_web: { label: 'Página web',  icon: '🌐' }
+  };
+
+  function chanCell(ch) {
+    const key = String(ch || '').toLowerCase();
+    const meta = CHANNELS[key];
+    if (!meta) return `<span class="dim">${escapeHtml(ch || '—')}</span>`;
+    return `<span class="chip chip--${key}">${meta.icon} ${meta.label}</span>`;
+  }
+
   function renderMessages() {
     const d = msgData; if (!d) return;
     const tbl = $('#msgsTable'); if (tbl) tbl.classList.toggle('msgs--nocost', d.canSeeCost === false); // oculta col Coste IA
     const body = $('#msgsBody');
     if (!d.items.length) {
-      body.innerHTML = `<tr><td colspan="10" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
+      body.innerHTML = `<tr><td colspan="11" class="msgs__empty">Sin intercambios en el rango.</td></tr>`;
     } else {
       body.innerHTML = d.items.map(m => `<tr>
         <td class="nowrap">${fmtDateTime(m.inAt || m.outAt)}</td>
         <td class="nowrap">${m.phone ? escapeHtml(m.phone) : '<span class="dim">—</span>'}${m.name ? `<div class="msgs__name">${escapeHtml(m.name)}</div>` : ''}</td>
+        <td class="nowrap">${chanCell(m.channel)}</td>
         <td class="msgs__in"><span class="msgs__text">${msgCell(m.inText, m.inType)}</span></td>
         <td class="msgs__out"><span class="msgs__text">${msgCell(m.outText, m.outType)}</span></td>
         <td class="nowrap">${sentByCell(m.sentBy)}</td>
@@ -204,11 +219,12 @@
       params.set('limit', '50');
       if (msgSearch) params.set('search', msgSearch);
       if (msgSender !== 'all') params.set('sender', msgSender);
+      if (msgChannel) params.set('channel', msgChannel);
       const res = await fetch('/api/messages?' + params.toString(), { headers: authHeaders() });
       msgData = await res.json();
       renderMessages();
     } catch (e) {
-      $('#msgsBody').innerHTML = `<tr><td colspan="10" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
+      $('#msgsBody').innerHTML = `<tr><td colspan="11" class="msgs__empty">Error: ${escapeHtml(e.message)}</td></tr>`;
     }
   }
 
@@ -317,6 +333,10 @@
       $('#senderSeg').querySelectorAll('.seg').forEach(x => x.classList.remove('seg--active'));
       b.classList.add('seg--active');
       msgSender = b.dataset.sender; msgPage = 1;
+      loadMessages();
+    });
+    $('#chanSel').addEventListener('change', e => {
+      msgChannel = e.target.value; msgPage = 1;
       loadMessages();
     });
     $('#btnRefresh').addEventListener('click', () => { load(); loadMessages(); });

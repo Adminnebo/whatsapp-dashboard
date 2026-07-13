@@ -84,6 +84,13 @@
             <button class="seg" data-sender="bot">🤖 Camila</button>
             <button class="seg" data-sender="human">👤 Usuarios</button>
           </div>
+          <select id="chanSel" class="chan-select" aria-label="Canal">
+            <option value="">Todos los canales</option>
+            <option value="whatsapp">WhatsApp</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="pagina_web">Página web</option>
+          </select>
           <input type="search" id="msgSearch" class="search-input" placeholder="Buscar teléfono, nombre o texto…" autocomplete="off" />
         </div>
         <div class="tablewrap">
@@ -92,6 +99,7 @@
               <tr>
                 <th>Fecha</th>
                 <th>Teléfono</th>
+                <th>Canal</th>
                 <th>Entrante (cliente)</th>
                 <th>Respuesta</th>
                 <th>Enviado por</th>
