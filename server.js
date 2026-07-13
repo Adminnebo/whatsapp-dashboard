@@ -46,7 +46,8 @@ async function logAction(req, action, contactId, detail) {
 }
 app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
-const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup']);
+// (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media']);
 app.use('/api', (req, res, next) => {
   if (!authConfigured) return next();                    // sin Supabase configurado: modo abierto (no rompe)
   if (req.path.startsWith('/auth/')) return next();      // el router de auth se protege solo
@@ -100,6 +101,15 @@ CREATE INDEX IF NOT EXISTS idx_action_logs_created ON action_logs(created_at DES
 CREATE UNIQUE INDEX IF NOT EXISTS uq_action_logs_ref ON action_logs(action, ref_id);
 `;
 async function migrate() { await q(MIGRATIONS); }
+
+// --- media pública pero firmada ---
+// /api/media NO puede exigir Authorization: las etiquetas <img>/<audio> y la
+// Cloud API de Meta (que descarga el adjunto al enviarlo) no mandan headers.
+// Se protege con una firma HMAC por id, así la URL no es adivinable.
+const crypto = require('crypto');
+const MEDIA_SECRET = process.env.MEDIA_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'nebo-media-fallback';
+const mediaSig = id => crypto.createHmac('sha256', MEDIA_SECRET).update(String(id)).digest('hex').slice(0, 24);
+const mediaUrlFor = (req, id) => originOf(req) + '/api/media?id=' + id + '&sig=' + mediaSig(id);
 
 // --- canales soportados (save-in / save-out) ---
 const CHANNELS_OK = ['whatsapp', 'instagram', 'facebook', 'pagina_web'];
@@ -217,7 +227,7 @@ app.get('/api/messages', wrap(async (req, res) => {
   const base = originOf(req);
   const messages = r.rows.map(m => {
     let mediaUrl = m.media_url || null;
-    if (!mediaUrl && m.has_blob) mediaUrl = base + '/api/media?id=' + m.id;
+    if (!mediaUrl && m.has_blob) mediaUrl = mediaUrlFor(req, m.id);
     return {
       id: String(m.id), conversationId: String(m.conversation_id), direction: m.direction, type: m.type || 'text',
       text: m.text || '', template: m.template || null, mediaUrl, mediaMime: m.media_mime || null,
@@ -231,6 +241,7 @@ app.get('/api/messages', wrap(async (req, res) => {
 app.get('/api/media', wrap(async (req, res) => {
   const id = String(req.query.id || '');
   if (!id) return res.status(400).end();
+  if (String(req.query.sig || '') !== mediaSig(id)) return res.status(403).end();  // URL firmada
   const r = await q(`SELECT media_data, media_mime, media_filename FROM messages WHERE id=$1::bigint AND media_data IS NOT NULL`, [id]);
   const row = r.rows[0];
   if (!row || !row.media_data) return res.status(404).end();
@@ -396,7 +407,7 @@ app.post('/api/send-media', upload.single('file'), wrap(async (req, res) => {
   const saved = await saveMessage(n);
   const to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
   let wamid = null, sent = false;
-  const mediaUrl = n.mediaUrl || (saved.id ? originOf(req) + '/api/media?id=' + saved.id : null);
+  const mediaUrl = n.mediaUrl || (saved.id ? mediaUrlFor(req, saved.id) : null);   // firmada: Meta la descarga sin auth
   if (to && WA_TOKEN && WA_PHONE && mediaUrl) {
     const media = { link: mediaUrl };
     if (n.type === 'document') media.filename = n.mediaName || 'documento';
