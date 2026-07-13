@@ -141,6 +141,20 @@ const CH_ALIAS = {
 };
 
 // --- normalizar + guardar un mensaje (save-in/out y send-media) ---
+// Instagram manda las notas de voz como .mp4 (video/mp4). Un mp4 solo-audio no
+// tiene pista de vídeo: en el contenedor no aparece el handler 'vide' (sí 'soun').
+// Miramos la cabecera del archivo para no pintar un reproductor de vídeo negro.
+function esAudioEnMp4(buf, mime) {
+  if (!Buffer.isBuffer(buf) || !buf.length) return false;
+  const m = String(mime || '').toLowerCase();
+  if (!m.includes('mp4') && !m.includes('m4a') && !m.includes('quicktime')) return false;
+  const head = buf.subarray(0, Math.min(buf.length, 256 * 1024));   // el moov suele ir al principio o al final
+  const tail = buf.subarray(Math.max(0, buf.length - 256 * 1024));
+  const tieneVideo = head.includes('vide', 0, 'latin1') || tail.includes('vide', 0, 'latin1');
+  const tieneAudio = head.includes('soun', 0, 'latin1') || tail.includes('soun', 0, 'latin1');
+  return tieneAudio && !tieneVideo;
+}
+
 function normalize(body, file, direction) {
   let ts = body.timestamp;
   if (ts == null || ts === '') ts = Math.floor(Date.now() / 1000);
@@ -165,6 +179,11 @@ function normalize(body, file, direction) {
     else if (hasMedia && m.startsWith('audio/')) type = 'audio';
     else if (hasMedia && m.startsWith('video/')) type = 'video';
     else type = hasMedia ? 'document' : 'text';
+  }
+  // Nota de voz de Instagram: viene marcada como vídeo, pero el mp4 es solo audio.
+  if ((type === 'video' || type === 'document') && esAudioEnMp4(mediaData, mediaMime || mediaName)) {
+    type = 'audio';
+    mediaMime = 'audio/mp4';
   }
   const text = body.text || body.caption || '';
   const LBL = { image: '📷 Imagen', audio: '🎵 Audio', video: '🎬 Video', sticker: '🎯 Sticker', document: '📄 ' + (mediaName || 'Documento') };
