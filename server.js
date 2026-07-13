@@ -101,13 +101,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_action_logs_ref ON action_logs(action, ref_
 `;
 async function migrate() { await q(MIGRATIONS); }
 
+// --- canales soportados (save-in / save-out) ---
+const CHANNELS_OK = ['whatsapp', 'instagram', 'facebook', 'pagina_web'];
+const CH_ALIAS = {
+  wa: 'whatsapp', ig: 'instagram', fb: 'facebook', messenger: 'facebook',
+  web: 'pagina_web', website: 'pagina_web', paginaweb: 'pagina_web',
+  'pagina-web': 'pagina_web', 'página_web': 'pagina_web', 'página web': 'pagina_web', 'pagina web': 'pagina_web'
+};
+
 // --- normalizar + guardar un mensaje (save-in/out y send-media) ---
 function normalize(body, file, direction) {
   let ts = body.timestamp;
   if (ts == null || ts === '') ts = Math.floor(Date.now() / 1000);
   else { ts = Number(ts); if (ts > 1e12) ts = Math.floor(ts / 1000); }
   const phone = body.phone ? String(body.phone).replace(/[^\d]/g, '') : null;
-  const ch = ['whatsapp', 'instagram', 'facebook'].includes(String(body.channel || '').toLowerCase()) ? String(body.channel).toLowerCase() : 'whatsapp';
+  let chRaw = String(body.channel || '').trim().toLowerCase();
+  chRaw = CH_ALIAS[chRaw] || chRaw;
+  const ch = CHANNELS_OK.includes(chRaw) ? chRaw : 'whatsapp';
   const mediaUrl = body.mediaUrl || body.media_url || null;
   let mediaMime = body.mediaMime || body.mimeType || body.mime || null;
   let mediaName = body.filename || body.mediaFilename || body.fileName || null;
