@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Conversaciones · WhatsApp Dashboard</title>
+  <title>Conversaciones · Nebo AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=30" />
+  <link rel="stylesheet" href="css/styles.css?v=31" />
 </head>
 <body>
   <!-- ============ APP SHELL ============ -->
@@ -14,7 +14,7 @@
 
     <!-- Rail / barra lateral de iconos (estilo GHL) -->
     <nav class="rail">
-      <div class="rail__logo">W</div>
+      <div class="rail__logo">N</div>
       <button class="rail__btn rail__btn--active" title="Conversaciones">
         <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/></svg>
       </button>
@@ -207,10 +207,6 @@
         <div id="detOpps"></div>
       </div>
 
-      <div class="details__section" id="detCustomSection" hidden>
-        <h3>Campos personalizados</h3>
-        <dl class="fields" id="detCustom"></dl>
-      </div>
 
     </aside>
   </div>
@@ -227,7 +223,7 @@
         <div class="form-group">
           <label>URL webhook · Enviar mensaje <small>(POST)</small></label>
           <input type="url" id="cfgSendUrl" placeholder="https://tu-n8n/webhook/wa-send" />
-          <p class="hint">El dashboard hará POST con <code>{ to, type, text|template }</code>. En n8n, el nodo HTTP Request llama a la WhatsApp Cloud API.</p>
+          <p class="hint">El dashboard hará POST con <code>{ to, type, text|template }</code>. En n8n, el nodo HTTP Request llama a la API del canal.</p>
         </div>
 
         <div class="form-group">
@@ -312,12 +308,12 @@
 
   <!-- Scripts clásicos (compatibles con file://, sin paso de build).
        ?v= = cache-busting: súbelo cuando cambies un .js para forzar recarga. -->
-  <script src="js/config.js?v=30"></script>
-  <script src="js/store.js?v=30"></script>
-  <script src="js/api.js?v=30"></script>
-  <script src="js/ui.js?v=30"></script>
-  <script src="js/auth.js?v=30"></script>
-  <script src="js/notifications.js?v=30"></script>
-  <script src="js/app.js?v=30"></script>
+  <script src="js/config.js?v=31"></script>
+  <script src="js/store.js?v=31"></script>
+  <script src="js/api.js?v=31"></script>
+  <script src="js/ui.js?v=31"></script>
+  <script src="js/auth.js?v=31"></script>
+  <script src="js/notifications.js?v=31"></script>
+  <script src="js/app.js?v=31"></script>
 </body>
 </html>

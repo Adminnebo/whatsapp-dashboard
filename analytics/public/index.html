@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Analítica · WhatsApp</title>
+  <title>Analítica · Nebo AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
@@ -13,7 +13,7 @@
     <div class="top__title">
       <div class="top__logo">📊</div>
       <div>
-        <h1>Analítica · WhatsApp</h1>
+        <h1>Analítica de conversaciones</h1>
         <p id="rangeLabel" class="top__sub">—</p>
       </div>
     </div>
@@ -41,6 +41,7 @@
   <nav class="tabs" id="tabs" role="tablist" aria-label="Vistas">
     <button class="tab tab--active" data-tab="resumen" role="tab">📈 Resumen</button>
     <button class="tab" data-tab="mensajes" role="tab">💬 Mensajes</button>
+    <button class="tab" data-tab="pipeline" role="tab">🗂️ Pipeline</button>
     <button class="tab" data-tab="registros" role="tab">📋 Registros</button>
   </nav>
 
@@ -118,6 +119,28 @@
       </section>
     </div>
 
+    <!-- Pestaña: Pipeline (tablero Kanban de oportunidades) -->
+    <div class="tabpanel" id="tabPipeline" hidden>
+      <section class="card card--wide board-card">
+        <div class="card__head">
+          <h2>Pipeline de oportunidades</h2>
+          <div class="board__controls">
+            <select id="pipeChan" class="chan-select" aria-label="Canal">
+              <option value="">Todos los canales</option>
+              <option value="whatsapp">💬 WhatsApp</option>
+              <option value="instagram">📸 Instagram</option>
+              <option value="facebook">📘 Facebook</option>
+              <option value="pagina_web">🌐 Página web</option>
+            </select>
+            <input type="search" id="pipeSearch" class="search-input" placeholder="Buscar nombre, teléfono o nº cotización…" autocomplete="off" />
+            <button class="icon-btn" id="pipeRefresh" title="Actualizar">↻</button>
+          </div>
+        </div>
+        <div class="board" id="boardWrap"><p class="board__err">Cargando…</p></div>
+        <p class="card__note">Arrastra una tarjeta entre columnas para cambiar su etapa. Haz clic en una tarjeta para ver la cotización. Las oportunidades las genera n8n; también puedes moverlas a mano.</p>
+      </section>
+    </div>
+
     <!-- Pestaña: Registros (acciones de la interfaz) -->
     <div class="tabpanel" id="tabRegistros" hidden>
       <section class="card card--wide">
@@ -137,8 +160,32 @@
   </main>
 
   <div id="tip" class="tip" hidden></div>
+
+  <!-- Modal: oportunidad (datos + adjunto PDF) -->
+  <div class="modal" id="quoteModal" hidden>
+    <div class="modal__box">
+      <button class="modal__close" id="quoteClose" title="Cerrar">✕</button>
+      <div id="quoteBody"></div>
+    </div>
+  </div>
+
+  <!-- Popup interno: vista previa del PDF -->
+  <div class="modal modal--viewer" id="pdfViewer" hidden>
+    <div class="modal__box modal__box--viewer">
+      <div class="viewer__bar">
+        <span class="viewer__name" id="pdfViewerName">Vista previa</span>
+        <div class="viewer__actions">
+          <a class="q__btn q__btn--dl" id="pdfViewerOpen" href="#" target="_blank" rel="noopener">↗ Abrir en pestaña</a>
+          <button class="modal__close" id="pdfViewerClose" title="Cerrar">✕</button>
+        </div>
+      </div>
+      <iframe class="viewer__frame" id="pdfFrame" title="Vista previa PDF" src="about:blank"></iframe>
+    </div>
+  </div>
+
   <script src="js/auth.js"></script>
   <script src="js/charts.js"></script>
+  <script src="js/pipeline.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

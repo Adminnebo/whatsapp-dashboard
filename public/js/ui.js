@@ -344,15 +344,8 @@
         } else { oppsSec.hidden = true; oppsBox.innerHTML = ''; }
       }
 
-      // campos personalizados
-      const cfSec = $('#detCustomSection'), cfBox = $('#detCustom');
-      const cf = (g && g.customFields) || [];
-      if (cfSec && cfBox) {
-        if (cf.length) {
-          cfSec.hidden = false;
-          cfBox.innerHTML = cf.map(f => `<div><dt>${esc(f.name)}</dt><dd>${esc(f.value)}</dd></div>`).join('');
-        } else { cfSec.hidden = true; cfBox.innerHTML = ''; }
-      }
+      // (los campos personalizados de GHL ya no se muestran: repetían el último mensaje
+      //  y el Bot Status, que ya salen en el hilo y en el botón CAMILA ON/OFF)
 
       // Camila OFF = handoff. Sale del flag que ya trae la conversación (instantáneo),
       // no de la respuesta de GHL: así el botón nunca contradice al aviso rojo.
