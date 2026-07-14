@@ -11,6 +11,7 @@ const multer = require('multer');
 const { q } = require('./db');
 
 const app = express();
+app.set('trust proxy', true);   // Railway termina el TLS: sin esto req.protocol siempre sería 'http'
 const PORT = process.env.PORT || 8080;
 
 // --- config (variables de entorno) ---
@@ -74,7 +75,15 @@ const COLORS = ['#2f6df6', '#e2497a', '#1aa179', '#f59e0b', '#7c3aed', '#0ea5e9'
 function colorFor(n) { n = n || '?'; let h = 0; for (let i = 0; i < n.length; i++) h = n.charCodeAt(i) + ((h << 5) - h); return COLORS[Math.abs(h) % COLORS.length]; }
 function initials(n) { return (n || '?').split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase(); }
 const asBool = v => (v === true || v === 'true' || v === 1 || v === '1');
-function originOf(req) { return PUBLIC_URL || (req.protocol + '://' + req.get('host')); }
+// OJO con el esquema: detrás del proxy de Railway, req.protocol es 'http' aunque el
+// usuario navegue por https. Si construimos las URLs de los adjuntos con http, Chrome
+// las trata como contenido mixto: las imágenes las auto-corrige, pero el <iframe> del
+// visor de PDF lo BLOQUEA (se ve un recuadro en blanco). Hacemos caso a x-forwarded-proto.
+function originOf(req) {
+  if (PUBLIC_URL) return PUBLIC_URL;
+  const proto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
+  return proto + '://' + req.get('host');
+}
 const wrap = fn => (req, res) => Promise.resolve(fn(req, res)).catch(e => { console.error(req.path, e); res.status(500).json({ error: e.message }); });
 
 async function ghl(pathname, opts = {}) {
@@ -384,6 +393,12 @@ app.get('/api/media', wrap(async (req, res) => {
   if (!row || !row.media_data) return res.status(404).end();
   res.set('Content-Type', row.media_mime || 'application/octet-stream');
   res.set('Cache-Control', 'public, max-age=86400');
+  // inline (no attachment): así el visor del navegador lo muestra en vez de descargarlo,
+  // y el nombre del archivo sale en la pestaña del visor de PDF.
+  if (row.media_filename) {
+    const seguro = String(row.media_filename).replace(/["\\\r\n]/g, '');
+    res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(seguro)}`);
+  }
   res.send(row.media_data);
 }));
 
