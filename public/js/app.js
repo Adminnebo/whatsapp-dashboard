@@ -66,10 +66,8 @@
       try {
         const d = await Api.getHandoffIds();
         const ids = new Set((d && d.contactIds) || []);
-        const changed = ids.size !== Store.handoffIds.size || [...ids].some(x => !Store.handoffIds.has(x));
         Store.handoffIds = ids;
-        UI.renderHandoffCount(ids.size);
-        if (changed) UI.renderList();
+        UI.renderList();                  // renderList ya recalcula el contador
       } catch (_) {}
     },
 

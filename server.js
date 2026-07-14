@@ -438,7 +438,13 @@ app.post('/api/delete-conversation', wrap(async (req, res) => {
   const cid = cr.rows[0] ? cr.rows[0].ghl_contact_id : null;
   const r = await q(`DELETE FROM conversations WHERE id=(NULLIF($1,''))::bigint RETURNING id`, [id]);
   const row = r.rows[0];
-  if (row) await logAction(req, 'conv_delete', cid, 'Eliminó la conversación');
+  if (row) {
+    // Sin conversación no hay nada que atender: el contacto deja de contar como handoff
+    // (si no, se quedaría marcado para siempre e inflaría el contador de la pestaña).
+    if (cid) await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
+                      WHERE ghl_contact_id = $1`, [cid]);
+    await logAction(req, 'conv_delete', cid, 'Eliminó la conversación');
+  }
   res.json({ ok: true, deleted: !!row, id: row ? String(row.id) : null });
 }));
 
@@ -589,7 +595,11 @@ app.post('/api/ghl-set-field', wrap(async (req, res) => {
 // con ?refresh=1 fuerza una consulta a GHL antes de responder.
 app.get('/api/handoff', wrap(async (req, res) => {
   if (asBool(req.query.refresh)) await scanHandoff();
-  const r = await q(`SELECT ghl_contact_id FROM contacts WHERE handoff = true AND ghl_contact_id IS NOT NULL`);
+  // Solo los que siguen teniendo conversación: un contacto marcado cuya conversación
+  // se borró no debe aparecer ni sumar en el contador.
+  const r = await q(`SELECT c.ghl_contact_id FROM contacts c
+                     JOIN conversations cv ON cv.contact_id = c.id
+                     WHERE c.handoff = true AND c.ghl_contact_id IS NOT NULL`);
   res.json({ ok: true, contactIds: r.rows.map(x => x.ghl_contact_id) });
 }));
 

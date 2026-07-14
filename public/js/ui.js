@@ -74,7 +74,10 @@
     },
 
     // ---------- contador de la pestaña Handoff ----------
-    renderHandoffCount(n) {
+    // Cuenta CONVERSACIONES en handoff, no contactos marcados: si se borra una
+    // conversación, su contacto ya no debe sumar aquí.
+    renderHandoffCount() {
+      const n = (Store.conversations || []).filter(c => Store.isHandoff(c)).length;
       const el2 = $('#handoffCount');
       if (el2) el2.textContent = n > 0 ? ' ' + n : '';
       const tab = document.querySelector('.tab[data-filter="handoff"]');
@@ -97,6 +100,7 @@
     renderList() {
       const box = $('#convList');
       const list = Store.visibleConversations();
+      this.renderHandoffCount();          // siempre en sintonía con lo que hay en la lista
       if (!list.length) {
         box.innerHTML = '<div class="list__body-empty"><p style="padding:30px;text-align:center;color:#9aa3b2">Sin conversaciones</p></div>';
         return;
