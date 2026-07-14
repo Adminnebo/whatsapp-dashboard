@@ -345,16 +345,101 @@
       }
     },
 
-    // ---------- plantillas ----------
+    // ---------- plantillas de Meta ----------
+    // Pinta {{1}} resaltado para que se vea dónde van las variables.
+    tplHtml(text, vals) {
+      return esc(String(text || '')).replace(/\{\{\s*(\d+)\s*\}\}/g, (m, n) => {
+        const v = vals && vals[Number(n) - 1];
+        return v ? `<b class="tpl__fill">${esc(v)}</b>` : `<span class="tpl__var">{{${n}}}</span>`;
+      });
+    },
+
     renderTemplates() {
       const box = $('#templateList');
+      const form = $('#templateForm');
+      if (form) form.hidden = true;
+      box.hidden = false;
+      $('#tplTitle').textContent = 'Plantillas de Meta';
+
+      if (Store.templatesError) {
+        box.innerHTML = `<p class="tpl__empty">No se pudieron leer las plantillas: ${esc(Store.templatesError)}</p>`;
+        return;
+      }
+      const list = Store.templates || [];
+      if (!list.length) {
+        box.innerHTML = '<p class="tpl__empty">No hay plantillas aprobadas en tu cuenta de WhatsApp.</p>';
+        return;
+      }
       box.innerHTML = '';
-      Store.templates.forEach(t => {
+      list.forEach(t => {
+        const nvars = (t.body && t.body.vars ? t.body.vars.length : 0) + (t.header && t.header.vars ? t.header.vars.length : 0);
         const node = el('div', 'tpl');
-        node.innerHTML = `<div class="tpl__name">${esc(t.name)} <span class="tpl__cat">${esc(t.category)}</span></div><div class="tpl__body">${esc(t.body)}</div>`;
+        node.innerHTML = `
+          <div class="tpl__name">${esc(t.name)}
+            <span class="tpl__cat">${esc(t.category || '')}</span>
+            <span class="tpl__lang">${esc(t.language || '')}</span>
+          </div>
+          <div class="tpl__body">${this.tplHtml(t.body && t.body.text)}</div>
+          ${nvars ? `<div class="tpl__meta">${nvars} variable${nvars > 1 ? 's' : ''} por rellenar</div>` : ''}`;
         node.addEventListener('click', () => global.App.useTemplate(t));
         box.appendChild(node);
       });
+    },
+
+    // Formulario para rellenar las variables de una plantilla, con vista previa viva.
+    renderTemplateForm(t) {
+      const box = $('#templateList'), form = $('#templateForm');
+      box.hidden = true; form.hidden = false;
+      $('#tplTitle').textContent = t.name;
+
+      const campo = (id, label, ph) =>
+        `<label class="tpl__field"><span>${esc(label)}</span><input id="${id}" type="text" placeholder="${esc(ph || '')}" /></label>`;
+
+      let campos = '';
+      if (t.header && t.header.format === 'TEXT') {
+        (t.header.vars || []).forEach(n => { campos += campo('tplH' + n, `Encabezado · variable {{${n}}}`); });
+      } else if (t.header && t.header.format !== 'TEXT') {
+        campos += campo('tplMedia', `Encabezado · URL del ${t.header.format.toLowerCase()}`, 'https://…');
+      }
+      (t.body.vars || []).forEach(n => { campos += campo('tplB' + n, `Variable {{${n}}}`); });
+      (t.buttons || []).forEach(b => {
+        (b.vars || []).forEach(n => { campos += campo('tplBt' + b.index, `Botón "${b.text}" · variable {{${n}}}`); });
+      });
+
+      form.innerHTML = `
+        <button class="tpl__back" id="tplBack">← Volver a la lista</button>
+        <div class="tpl__card">
+          ${t.header && t.header.format === 'TEXT' && t.header.text ? `<div class="tpl__head-txt" id="tplPrevH">${this.tplHtml(t.header.text)}</div>` : ''}
+          ${t.header && t.header.format !== 'TEXT' ? `<div class="tpl__media">📎 ${esc(t.header.format)}</div>` : ''}
+          <div class="tpl__prev" id="tplPrev">${this.tplHtml(t.body.text)}</div>
+          ${t.footer ? `<div class="tpl__foot">${esc(t.footer)}</div>` : ''}
+          ${(t.buttons || []).length ? `<div class="tpl__btns">${t.buttons.map(b => `<span>${esc(b.text)}</span>`).join('')}</div>` : ''}
+        </div>
+        ${campos || '<p class="tpl__meta">Esta plantilla no tiene variables.</p>'}
+        <button class="tpl__send" id="tplSend">Enviar plantilla</button>`;
+
+      // vista previa viva
+      const repinta = () => {
+        const vals = (t.body.vars || []).map(n => (document.getElementById('tplB' + n) || {}).value || '');
+        // los índices de las variables no tienen por qué ser 1..n consecutivos
+        const arr = [];
+        (t.body.vars || []).forEach((n, i) => { arr[n - 1] = vals[i]; });
+        $('#tplPrev').innerHTML = this.tplHtml(t.body.text, arr);
+        if (t.header && t.header.format === 'TEXT' && $('#tplPrevH')) {
+          const h = [];
+          (t.header.vars || []).forEach(n => { h[n - 1] = (document.getElementById('tplH' + n) || {}).value || ''; });
+          $('#tplPrevH').innerHTML = this.tplHtml(t.header.text, h);
+        }
+      };
+      form.querySelectorAll('input').forEach(i => i.addEventListener('input', repinta));
+      $('#tplBack').addEventListener('click', () => this.renderTemplates());
+      $('#tplSend').addEventListener('click', () => global.App.sendTemplate(t));
+
+      // atajo: la primera variable del cuerpo suele ser el nombre del contacto
+      const conv = Store.activeConversation();
+      const first = t.body.vars && t.body.vars[0];
+      const inp = first && document.getElementById('tplB' + first);
+      if (inp && conv && conv.name) { inp.value = String(conv.name).split(' ')[0]; repinta(); }
     },
 
     toast(msg) {

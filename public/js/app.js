@@ -18,6 +18,7 @@
       this.startPolling();
       this.loadBotState();
       this.loadHandoff();
+      this.loadTemplates();
       if (global.Notifs) global.Notifs.init();
     },
 
@@ -390,13 +391,66 @@
       return out;
     },
 
+    // ---------- plantillas de Meta ----------
+    async loadTemplates(force) {
+      try {
+        const d = await Api.getWaTemplates(force);
+        Store.templates = (d && d.templates) || [];
+        Store.templatesError = d && d.ok === false ? (d.error || 'error') : null;
+      } catch (e) {
+        Store.templates = [];
+        Store.templatesError = e.message;
+      }
+      UI.renderTemplates();
+    },
+
     useTemplate(tpl) {
-      $('#templateModal').hidden = true;
       const conv = Store.activeConversation();
       if (!conv) { UI.toast('Selecciona una conversación primero'); return; }
-      // sustituye {{1}} por el nombre como demostración
-      const filled = tpl.body.replace('{{1}}', conv.name.split(' ')[0]);
-      this.send(filled, { template: tpl.name });
+      UI.renderTemplateForm(tpl);
+    },
+
+    async sendTemplate(tpl) {
+      const conv = Store.activeConversation();
+      if (!conv) { UI.toast('Selecciona una conversación primero'); return; }
+      const val = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+
+      // Meta exige TODAS las variables: si falta alguna, rechaza el envío.
+      const bodyParams = [], headerParams = [], buttonParams = [];
+      (tpl.body.vars || []).forEach(n => { bodyParams[n - 1] = val('tplB' + n); });
+      if (tpl.header && tpl.header.format === 'TEXT') {
+        (tpl.header.vars || []).forEach(n => { headerParams[n - 1] = val('tplH' + n); });
+      }
+      (tpl.buttons || []).forEach(b => { if ((b.vars || []).length) buttonParams.push({ index: b.index, text: val('tplBt' + b.index) }); });
+      const faltan = [...bodyParams, ...headerParams, ...buttonParams.map(b => b.text)].some(v => !v);
+      if (faltan) { UI.toast('Rellena todas las variables'); return; }
+
+      const payload = {
+        name: tpl.name, language: tpl.language,
+        to: conv.phone, contactId: conv.contactId, contactName: conv.name,
+        bodyParams, headerParams, buttonParams,
+        preview: tpl.body.text
+      };
+      if (tpl.header && tpl.header.format !== 'TEXT') {
+        const link = val('tplMedia');
+        if (!link) { UI.toast('Falta la URL del ' + tpl.header.format.toLowerCase()); return; }
+        payload.headerMedia = { type: tpl.header.format.toLowerCase(), link };
+      }
+
+      const btn = document.getElementById('tplSend');
+      if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+      try {
+        await Api.sendTemplate(payload);
+        $('#templateModal').hidden = true;
+        UI.toast('Plantilla enviada');
+        Store.messagesByConv[Store.activeId] = await Api.loadMessages(Store.activeId);
+        UI.renderThread();
+        this.refreshData();
+      } catch (e) {
+        UI.toast(e.message);                       // el error viene tal cual de Meta
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Enviar plantilla'; }
+      }
     },
 
     // ---------- polling (incremental: re-renderiza solo si hay cambios) ----------
@@ -528,7 +582,12 @@
         this.setStatus(c.status === 'closed' ? 'open' : 'closed');
       });
       // plantillas
-      $('#btnTemplate').addEventListener('click', () => { $('#templateModal').hidden = false; });
+      $('#btnTemplate').addEventListener('click', () => {
+        $('#templateModal').hidden = false;
+        UI.renderTemplates();                       // vuelve siempre a la lista
+        if (!Store.templates.length) this.loadTemplates();
+      });
+      $('#tplRefresh').addEventListener('click', () => this.loadTemplates(true));
       // tema claro/oscuro
       $('#btnTheme').addEventListener('click', () => this.toggleTheme());
       // ajustes

@@ -92,6 +92,63 @@ async function waSend(payload) {
   const json = await res.json().catch(() => null);
   return { ok: res.ok, status: res.status, json };
 }
+// Llamada genérica a la Graph API con el token de WhatsApp.
+async function graph(pathname) {
+  const sep = pathname.includes('?') ? '&' : '?';
+  const res = await fetch('https://graph.facebook.com/v21.0' + pathname + sep + 'access_token=' + encodeURIComponent(WA_TOKEN));
+  const json = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, json };
+}
+// Mensaje de error legible que devuelve Meta (para enseñárselo al agente tal cual).
+const metaError = j => (j && j.error && (j.error.error_user_msg || j.error.message)) || 'Error de Meta';
+
+// ── Plantillas de Meta ───────────────────────────────────────────────────────
+// El id de la cuenta de WhatsApp (WABA) hace falta para listar plantillas. Si no
+// está en el entorno lo deducimos del propio token (debug_token nos dice sobre qué
+// WABA tiene permisos) y lo cacheamos.
+let _waba = process.env.WHATSAPP_WABA_ID || '';
+async function wabaId() {
+  if (_waba) return _waba;
+  if (!WA_TOKEN) return '';
+  const { json } = await graph(`/debug_token?input_token=${encodeURIComponent(WA_TOKEN)}`);
+  const scopes = (json && json.data && json.data.granular_scopes) || [];
+  for (const s of scopes) {
+    if (/whatsapp_business/.test(s.scope || '') && Array.isArray(s.target_ids) && s.target_ids.length) {
+      _waba = String(s.target_ids[0]);
+      console.log('[wa] WABA detectada desde el token:', _waba);
+      return _waba;
+    }
+  }
+  return '';
+}
+// Saca las variables {{1}}, {{2}}… de un texto, ordenadas y sin repetir.
+function varsOf(s) {
+  const set = new Set();
+  String(s || '').replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n) => { set.add(Number(n)); return _m; });
+  return [...set].sort((a, b) => a - b);
+}
+// Traduce la plantilla de Meta a algo que la interfaz pueda pintar y rellenar.
+function parseTemplate(t) {
+  const comps = t.components || [];
+  const head = comps.find(c => c.type === 'HEADER');
+  const body = comps.find(c => c.type === 'BODY');
+  const foot = comps.find(c => c.type === 'FOOTER');
+  const btns = (comps.find(c => c.type === 'BUTTONS') || {}).buttons || [];
+  return {
+    name: t.name, language: t.language, category: t.category, status: t.status,
+    header: head ? { format: head.format || 'TEXT', text: head.text || '', vars: varsOf(head.text) } : null,
+    body: { text: (body && body.text) || '', vars: varsOf(body && body.text) },
+    footer: (foot && foot.text) || '',
+    buttons: btns.map((b, i) => ({ index: i, type: b.type, text: b.text || '', url: b.url || '', vars: varsOf(b.url) }))
+  };
+}
+// Sustituye {{n}} por los valores dados (para guardar el texto real en el historial).
+function fillVars(text, params) {
+  return String(text || '').replace(/\{\{\s*(\d+)\s*\}\}/g, (_m, n) => {
+    const v = params[Number(n) - 1];
+    return v != null && v !== '' ? String(v) : _m;
+  });
+}
 
 // --- migraciones (tablas) ---
 const MIGRATIONS = `
@@ -503,6 +560,80 @@ app.post('/api/send', wrap(async (req, res) => {
   n.sentBy = await agentName(req);   // quién lo envió (agente logueado)
   const saved = await saveMessage(n);
   res.json({ id: saved.id, conversationId: saved.conversationId, status: sent ? 'sent' : 'failed', wamid, sent });
+}));
+
+// ---- plantillas de Meta ----
+// Lista las plantillas de la WABA (cacheadas 5 min). Solo las APROBADAS por defecto;
+// con ?all=1 devuelve también las pendientes/rechazadas, marcadas con su estado.
+let _tplCache = { at: 0, items: [] };
+app.get('/api/wa-templates', wrap(async (req, res) => {
+  if (!WA_TOKEN) return res.json({ ok: false, error: 'Falta WHATSAPP_TOKEN', templates: [] });
+  const waba = await wabaId();
+  if (!waba) return res.json({ ok: false, error: 'No se pudo determinar la WABA (define WHATSAPP_WABA_ID)', templates: [] });
+
+  const fresco = Date.now() - _tplCache.at < 5 * 60 * 1000;
+  if (!fresco || asBool(req.query.refresh)) {
+    const { ok, json } = await graph(`/${waba}/message_templates?limit=200&fields=name,status,category,language,components`);
+    if (!ok) return res.status(400).json({ ok: false, error: metaError(json), templates: [] });
+    _tplCache = { at: Date.now(), items: ((json && json.data) || []).map(parseTemplate) };
+  }
+  const todas = asBool(req.query.all);
+  const templates = _tplCache.items.filter(t => todas || t.status === 'APPROVED');
+  res.json({ ok: true, waba, templates, cachedAt: _tplCache.at });
+}));
+
+// Envía una plantilla aprobada. Es lo ÚNICO que Meta deja mandar fuera de la
+// ventana de 24 h. Guarda en el historial el texto ya rellenado.
+app.post('/api/send-template', wrap(async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+  const lang = String(b.language || '').trim() || 'es';
+  const to = b.to ? String(b.to).replace(/[^\d]/g, '') : null;
+  if (!name) return res.status(400).json({ ok: false, error: 'Falta el nombre de la plantilla' });
+  if (!to) return res.status(400).json({ ok: false, error: 'El contacto no tiene teléfono' });
+  if (!WA_TOKEN || !WA_PHONE) return res.status(400).json({ ok: false, error: 'WhatsApp no está configurado' });
+
+  const txt = v => ({ type: 'text', text: String(v == null ? '' : v) });
+  const headerParams = Array.isArray(b.headerParams) ? b.headerParams : [];
+  const bodyParams = Array.isArray(b.bodyParams) ? b.bodyParams : [];
+  const buttonParams = Array.isArray(b.buttonParams) ? b.buttonParams : [];   // [{index, text}]
+  const headerMedia = b.headerMedia || null;                                   // {type, link, filename}
+
+  const components = [];
+  if (headerMedia && headerMedia.link) {
+    const t = String(headerMedia.type || 'image').toLowerCase();
+    const media = { link: headerMedia.link };
+    if (t === 'document' && headerMedia.filename) media.filename = headerMedia.filename;
+    components.push({ type: 'header', parameters: [{ type: t, [t]: media }] });
+  } else if (headerParams.length) {
+    components.push({ type: 'header', parameters: headerParams.map(txt) });
+  }
+  if (bodyParams.length) components.push({ type: 'body', parameters: bodyParams.map(txt) });
+  buttonParams.forEach(bp => components.push({
+    type: 'button', sub_type: 'url', index: String(bp.index),
+    parameters: [txt(bp.text)]
+  }));
+
+  const payload = {
+    messaging_product: 'whatsapp', to, type: 'template',
+    template: { name, language: { code: lang }, ...(components.length ? { components } : {}) }
+  };
+  const r = await waSend(payload);
+  const wamid = r.json && r.json.messages && r.json.messages[0] ? r.json.messages[0].id : null;
+  if (!r.ok || !wamid) return res.status(400).json({ ok: false, error: metaError(r.json) });
+
+  // Guardamos el texto YA rellenado, para que en el hilo se lea el mensaje real.
+  // OJO: no expandimos `b` aquí — su `name` es el de la PLANTILLA, y para normalize
+  // `name` es el nombre del CONTACTO (lo pisaría en la base).
+  const texto = fillVars(b.preview || '', bodyParams) || ('[plantilla] ' + name);
+  const n = normalize({
+    contactId: b.contactId || null, name: b.contactName || null, phone: to,
+    text: texto, wamid, type: 'text', channel: 'whatsapp', status: 'sent'
+  }, null, 'out');
+  n.sentBy = await agentName(req);
+  const saved = await saveMessage(n);
+  if (saved.id) await q(`UPDATE messages SET template = $1 WHERE id = $2::bigint`, [name, saved.id]);
+  res.json({ ok: true, id: saved.id, conversationId: saved.conversationId, wamid, sent: true });
 }));
 
 app.post('/api/send-media', upload.single('file'), wrap(async (req, res) => {

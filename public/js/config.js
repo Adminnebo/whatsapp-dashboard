@@ -18,10 +18,5 @@ window.WA_CONFIG = {
 
   pollInterval: 10000,
 
-  templates: [
-    { name: 'recordatorio_cita', category: 'UTILITY',   body: 'Hola {{1}}, te recordamos tu cita el {{2}} a las {{3}}. Responde CONFIRMAR para confirmarla.' },
-    { name: 'bienvenida',        category: 'MARKETING',  body: '¡Hola {{1}}! Gracias por contactarnos. ¿En qué podemos ayudarte hoy?' },
-    { name: 'seguimiento_pago',  category: 'UTILITY',    body: 'Hola {{1}}, tu pago de {{2}} está pendiente. Puedes completarlo aquí: {{3}}' },
-    { name: 'reactivacion',      category: 'MARKETING',  body: '¡Te extrañamos {{1}}! Tenemos una oferta especial para ti este mes.' }
-  ]
+  // Las plantillas ya no se definen aquí: se leen de Meta (/api/wa-templates)
 };

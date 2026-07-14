@@ -46,7 +46,8 @@
     ghlByContact: {},     // cache de datos completos de GHL por contactId (sesión)
     nameByContact: {},    // cache de nombre GHL por contactId (liviano)
     handoffIds: new Set(),// contactIds con etiqueta handoff (GHL)
-    templates: cfg.templates || [],
+    templates: [],        // plantillas aprobadas en Meta (se cargan de /api/wa-templates)
+    templatesError: null,
     activeId: null,
     filter: 'all',       // all | unread | starred
     search: '',

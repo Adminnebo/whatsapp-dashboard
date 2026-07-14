@@ -37,9 +37,24 @@
       const data = await http(S().convUrl, { method: 'GET', headers: headers() });
       return {
         conversations: data.conversations || data || [],
-        messagesByConv: data.messagesByConv || {},
-        templates: data.templates || CFG().templates || []
+        messagesByConv: data.messagesByConv || {}
+        // las plantillas ya no vienen de aquí: se leen de Meta (getWaTemplates)
       };
+    },
+
+    // ---------------------------------------------------------------
+    // Plantillas aprobadas en Meta (WABA) -> { templates: [...] }
+    // ---------------------------------------------------------------
+    async getWaTemplates(refresh) {
+      return await http('/api/wa-templates' + (refresh ? '?refresh=1' : ''), { method: 'GET', headers: headers() });
+    },
+
+    // Envía una plantilla aprobada (único envío permitido fuera de las 24 h).
+    async sendTemplate(payload) {
+      const res = await fetch('/api/send-template', { method: 'POST', headers: headers(), body: JSON.stringify(payload) });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || 'No se pudo enviar la plantilla');
+      return data;
     },
 
     // ---------------------------------------------------------------

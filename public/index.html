@@ -6,7 +6,7 @@
   <title>Conversaciones · WhatsApp Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=22" />
+  <link rel="stylesheet" href="css/styles.css?v=23" />
 </head>
 <body>
   <!-- ============ APP SHELL ============ -->
@@ -264,10 +264,14 @@
     <div class="modal__backdrop" data-close></div>
     <div class="modal__card modal__card--sm">
       <header class="modal__head">
-        <h2>Plantillas de mensaje</h2>
-        <button class="btn-icon" data-close>✕</button>
+        <h2 id="tplTitle">Plantillas de Meta</h2>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button class="btn-icon" id="tplRefresh" title="Recargar desde Meta">⟳</button>
+          <button class="btn-icon" data-close>✕</button>
+        </div>
       </header>
       <div class="modal__body" id="templateList"><!-- plantillas inyectadas --></div>
+      <div class="modal__body" id="templateForm" hidden><!-- variables + vista previa --></div>
     </div>
   </div>
 
@@ -289,12 +293,12 @@
 
   <!-- Scripts clásicos (compatibles con file://, sin paso de build).
        ?v= = cache-busting: súbelo cuando cambies un .js para forzar recarga. -->
-  <script src="js/config.js?v=22"></script>
-  <script src="js/store.js?v=22"></script>
-  <script src="js/api.js?v=22"></script>
-  <script src="js/ui.js?v=22"></script>
-  <script src="js/auth.js?v=22"></script>
-  <script src="js/notifications.js?v=22"></script>
-  <script src="js/app.js?v=22"></script>
+  <script src="js/config.js?v=23"></script>
+  <script src="js/store.js?v=23"></script>
+  <script src="js/api.js?v=23"></script>
+  <script src="js/ui.js?v=23"></script>
+  <script src="js/auth.js?v=23"></script>
+  <script src="js/notifications.js?v=23"></script>
+  <script src="js/app.js?v=23"></script>
 </body>
 </html>
