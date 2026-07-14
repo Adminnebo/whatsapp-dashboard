@@ -101,9 +101,9 @@
           (c.lastMessage || '').toLowerCase().includes(q)
         );
       }
-      // Handoff siempre arriba (fijado); dentro de cada grupo, lo más reciente primero.
-      const h = c => (this.isHandoff(c) ? 1 : 0);
-      return list.sort((a, b) => (h(b) - h(a)) || (b.lastMessageAt - a.lastMessageAt));
+      // Los handoff NO se fijan arriba: se ordenan por recencia como todos. Si la persona
+      // vuelve a escribir, sube sola; el rojo ya avisa de que ese chat va en manual.
+      return list.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
     },
     saveSettings,
     loadSettings

@@ -6,7 +6,7 @@
   <title>Conversaciones · WhatsApp Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=24" />
+  <link rel="stylesheet" href="css/styles.css?v=25" />
 </head>
 <body>
   <!-- ============ APP SHELL ============ -->
@@ -107,7 +107,7 @@
 
         <div class="handoff-banner" id="handoffBanner">
           <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
-          <span><strong>Handoff activo</strong> — el bot no responderá a este contacto. Requiere atención humana.</span>
+          <span><strong>Camila OFF (handoff)</strong> — conversación en manual: el bot no responderá a este contacto.</span>
         </div>
 
         <div class="thread__messages" id="messages"><!-- mensajes inyectados --></div>
@@ -160,9 +160,9 @@
       <div class="details__head">
         <div class="avatar avatar--lg" id="detAvatar">--</div>
         <div class="details__name" id="detName">--</div>
-        <button id="convToggle" class="pill-toggle pill-toggle--on" title="Abrir / cerrar la conversación (cerrar detiene el bot)">
+        <button id="convToggle" class="pill-toggle pill-toggle--on" title="Encender / apagar a Camila para este contacto (apagar = handoff, la conversación pasa a manual)">
           <span class="pill-toggle__dot"></span>
-          <span id="convToggleLabel">Abierta</span>
+          <span id="convToggleLabel">CAMILA ON</span>
         </button>
         <div class="details__phone" id="detPhone">--</div>
         <div class="details__quick">
@@ -293,12 +293,12 @@
 
   <!-- Scripts clásicos (compatibles con file://, sin paso de build).
        ?v= = cache-busting: súbelo cuando cambies un .js para forzar recarga. -->
-  <script src="js/config.js?v=24"></script>
-  <script src="js/store.js?v=24"></script>
-  <script src="js/api.js?v=24"></script>
-  <script src="js/ui.js?v=24"></script>
-  <script src="js/auth.js?v=24"></script>
-  <script src="js/notifications.js?v=24"></script>
-  <script src="js/app.js?v=24"></script>
+  <script src="js/config.js?v=25"></script>
+  <script src="js/store.js?v=25"></script>
+  <script src="js/api.js?v=25"></script>
+  <script src="js/ui.js?v=25"></script>
+  <script src="js/auth.js?v=25"></script>
+  <script src="js/notifications.js?v=25"></script>
+  <script src="js/app.js?v=25"></script>
 </body>
 </html>

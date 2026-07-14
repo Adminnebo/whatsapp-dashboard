@@ -301,7 +301,7 @@ app.get('/api/conversations', wrap(async (_req, res) => {
       conv.channel, conv.status, conv.starred, conv.unread_count, conv.last_message, conv.last_direction, conv.last_status,
       EXTRACT(EPOCH FROM conv.last_message_at)*1000 AS last_message_at, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
       FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
-      ORDER BY c.handoff DESC NULLS LAST, conv.last_message_at DESC NULLS LAST`);
+      ORDER BY conv.last_message_at DESC NULLS LAST`);
   const conversations = r.rows.map(row => {
     const nm = row.name || row.phone || '?';
     return {
@@ -497,14 +497,57 @@ async function setBotStatus(contactId, value) {
   });
   return !!(json && json.contact && json.contact.id);
 }
+// Quita la etiqueta handoff en GHL (al volver a encender a Camila). Si no la quitáramos,
+// el escáner volvería a apagarla en la siguiente pasada.
+async function quitarTagHandoff(contactId) {
+  const r = await ghl('/contacts/' + encodeURIComponent(contactId) + '/tags', {
+    method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags: [HANDOFF_TAG] })
+  });
+  return r.ok;
+}
+
+// Enciende / apaga a Camila PARA ESE CONTACTO (bot_status = '' | 'STOP' en GHL).
+// Apagar = handoff: el chat se marca en rojo y avisa. Encender lo limpia todo,
+// incluida la etiqueta handoff en GHL.
 app.post('/api/ghl-set-field', wrap(async (req, res) => {
   const contactId = String((req.body && req.body.contactId) || '').trim();
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
   if (!contactId) return res.json({ ok: false });
+  const closed = String(value).toUpperCase() === 'STOP';   // closed = Camila OFF
+
   const { json } = await ghl('/contacts/' + encodeURIComponent(contactId), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customFields: [{ id: BOT_STATUS_FIELD, value }] }) });
-  const closed = String(value).toUpperCase() === 'STOP';
-  await logAction(req, closed ? 'conv_close' : 'conv_open', contactId, closed ? 'Cerró la conversación' : 'Abrió la conversación');
-  res.json({ ok: !!(json && json.contact && json.contact.id), contactId: json && json.contact ? json.contact.id : null });
+  const ok = !!(json && json.contact && json.contact.id);
+
+  if (ok) {
+    if (closed) {
+      // Camila OFF → marca handoff (rojo + notificación), venga del botón o de la etiqueta.
+      const upd = await q(
+        `UPDATE contacts SET handoff = true, handoff_stopped = true,
+                handoff_at = COALESCE(handoff_at, now())
+         WHERE ghl_contact_id = $1 AND handoff IS NOT TRUE
+         RETURNING id, name, phone`, [contactId]);
+      const c = upd.rows[0];
+      if (c) {
+        const cv = await q(`SELECT id FROM conversations WHERE contact_id = $1 LIMIT 1`, [c.id]);
+        await notify({
+          type: 'handoff', contactId, conversationId: cv.rows[0] ? cv.rows[0].id : null,
+          title: 'Camila OFF: ' + (c.name || c.phone || 'contacto'),
+          body: 'Conversación en manual — el bot no responderá',
+          refId: contactId + ':' + Date.now()
+        });
+      }
+    } else {
+      // Camila ON → fuera handoff: etiqueta en GHL incluida.
+      await quitarTagHandoff(contactId).catch(e => console.error('quitarTagHandoff', e.message));
+      await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
+               WHERE ghl_contact_id = $1`, [contactId]);
+    }
+  }
+
+  await logAction(req, closed ? 'conv_close' : 'conv_open', contactId,
+    closed ? 'Apagó a Camila (conversación manual)' : 'Encendió a Camila (quitó el handoff)');
+  res.json({ ok, contactId: ok ? json.contact.id : null, handoff: ok ? closed : null });
 }));
 
 // Contactos con la etiqueta handoff. Sirve del cache en DB (lo mantiene scanHandoff);
@@ -744,8 +787,20 @@ async function scanHandoff() {
       body: JSON.stringify({ locationId: LOCATION_ID, pageLimit: 100, filters: [{ field: 'tags', operator: 'contains', value: HANDOFF_TAG }] })
     });
     if (!json || !Array.isArray(json.contacts)) return;   // GHL falló: no tocamos el estado
-    const ids = json.contacts.map(c => c.id).filter(Boolean);
+    const candidatos = json.contacts.map(c => c.id).filter(Boolean);
 
+    // El índice de búsqueda de GHL va con retraso: sigue devolviendo el contacto un rato
+    // después de quitarle la etiqueta. Si nos fiáramos de él, volveríamos a apagar a Camila
+    // justo después de que alguien la encendiera. Por eso confirmamos contra el contacto real.
+    const ids = [];
+    for (const id of candidatos) {
+      try {
+        const { json: c } = await ghl('/contacts/' + encodeURIComponent(id));
+        const tags = ((c && c.contact && c.contact.tags) || []).map(t => String(t).toLowerCase());
+        if (tags.includes(String(HANDOFF_TAG).toLowerCase())) ids.push(id);
+        else console.log('[handoff] la búsqueda devolvió', id, 'pero ya no tiene la etiqueta (índice desfasado): se ignora');
+      } catch (e) { console.error('handoff verificar', id, e.message); }
+    }
     // 1) Nuevos: los que tienen la etiqueta y aún no estaban marcados → notificación.
     const nuevos = await q(
       `UPDATE contacts SET handoff = true, handoff_at = now()
@@ -781,10 +836,10 @@ async function scanHandoff() {
       } catch (e) { console.error('handoff setBotStatus', c.ghl_contact_id, e.message); }
     }
 
-    // 3) Los que ya no tienen la etiqueta vuelven a la normalidad. La conversación se
-    //    queda cerrada a propósito: reabrirla es decisión del agente (botón de la app).
-    await q(`UPDATE contacts SET handoff = false, handoff_at = NULL, handoff_stopped = false
-             WHERE handoff = true AND NOT (ghl_contact_id = ANY($1::text[]))`, [ids]);
+    // NO desmarcamos a los que no tienen la etiqueta: un chat puesto en manual desde el
+    // botón (Camila OFF) no lleva etiqueta y debe seguir en rojo. El handoff solo se
+    // levanta encendiendo a Camila (POST /api/ghl-set-field con valor vacío), que además
+    // borra la etiqueta en GHL.
   } catch (e) { console.error('scanHandoff', e.message); }
 }
 setInterval(scanHandoff, 60 * 1000);       // cada minuto

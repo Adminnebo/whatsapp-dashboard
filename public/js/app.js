@@ -179,13 +179,22 @@
       if (bs) conv.status = (String(bs.value).trim().toUpperCase() === 'STOP') ? 'closed' : 'open';
     },
 
-    // Cambia estado abierta/cerrada y escribe bot_status en GHL (STOP / vacío).
+    // Enciende / apaga a Camila para este contacto (escribe bot_status en GHL).
+    // Apagar = handoff: el chat se pinta en rojo. Encender lo limpia (y quita la etiqueta).
     async setStatus(status) {
       const c = Store.activeConversation(); if (!c) return;
+      const closed = status === 'closed';
       c.status = status;
+      c.handoff = closed;                                   // rojo inmediato, sin esperar al poll
+      if (c.contactId) {
+        if (closed) Store.handoffIds.add(c.contactId);
+        else Store.handoffIds.delete(c.contactId);
+      }
       UI.renderDetails(c);
+      UI.renderList();
+      UI.renderThread();
       if (!c.contactId || !Store.settings.ghlFieldUrl) return;
-      const value = status === 'closed' ? 'STOP' : '';
+      const value = closed ? 'STOP' : '';
       try {
         await Api.setGhlField(c.contactId, value);
         // refleja en la caché para que un re-render no lo revierta
@@ -195,7 +204,8 @@
           const bs = entry.contact.customFields.find(f => f.name === 'Bot Status');
           if (bs) bs.value = value; else entry.contact.customFields.push({ name: 'Bot Status', value });
         }
-        UI.toast(status === 'closed' ? 'Cerrada · bot detenido (STOP)' : 'Abierta · bot reactivado');
+        UI.toast(closed ? 'Camila OFF · conversación en manual (handoff)' : 'Camila ON · handoff retirado');
+        if (window.Notifs) Notifs.load();            // refresca el aviso al instante
       } catch (e) {
         UI.toast('No se pudo actualizar GHL: ' + e.message);
       }

@@ -115,7 +115,7 @@
           </div>
           <div class="conv__main">
             <div class="conv__top">
-              <span class="conv__name">${handoff ? '<span class="conv__pin" title="Fijada por handoff">📌</span> ' : ''}${esc(c.name)}</span>
+              <span class="conv__name">${esc(c.name)}</span>
               <span class="conv__time">${relList(c.lastMessageAt)}</span>
             </div>
             <div class="conv__bottom">
@@ -348,10 +348,10 @@
 
       const ct = $('#convToggle'), ctl = $('#convToggleLabel');
       if (ct) {
-        const closed = conv.status === 'closed';
+        const closed = conv.status === 'closed';   // cerrada = Camila apagada para este contacto
         ct.classList.toggle('pill-toggle--off', closed);
         ct.classList.toggle('pill-toggle--on', !closed);
-        if (ctl) ctl.textContent = closed ? 'Cerrada' : 'Abierta';
+        if (ctl) ctl.textContent = closed ? 'CAMILA OFF' : 'CAMILA ON';
       }
     },
 
