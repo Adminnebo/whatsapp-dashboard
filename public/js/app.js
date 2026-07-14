@@ -94,16 +94,28 @@
     async openConversation(id) {
       Store.activeId = id;
       Store.markRead(id);
-      // Carga mensajes bajo demanda si aún no están
-      if (!(Store.messagesByConv[id] || []).length) {
-        try { Store.messagesByConv[id] = await Api.loadMessages(id); }
-        catch (e) { UI.toast('No se pudieron cargar los mensajes'); }
-      }
       const c = Store.activeConversation();
       this._activeStatus = c ? c.lastStatus : null;
+
+      // Pinta YA la cabecera y lo que haya en caché: si esperamos a la red, el hilo
+      // se queda en negro todo lo que tarde /api/messages (en producción, segundos).
       UI.renderList();
       UI.renderThread();
       this.loadGhl(c);
+
+      if (!(Store.messagesByConv[id] || []).length) {
+        UI.showThreadLoading(true);
+        try {
+          const msgs = await Api.loadMessages(id);
+          if (Store.activeId !== id) return;        // el usuario ya se fue a otro chat
+          Store.messagesByConv[id] = msgs;
+          UI.renderThread();
+        } catch (e) {
+          if (Store.activeId === id) UI.toast('No se pudieron cargar los mensajes');
+        } finally {
+          if (Store.activeId === id) UI.showThreadLoading(false);
+        }
+      }
     },
 
     // ¿el texto parece un nombre real? (tiene al menos una letra)

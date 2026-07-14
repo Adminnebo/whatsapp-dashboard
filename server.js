@@ -320,7 +320,9 @@ app.get('/api/conversations', wrap(async (_req, res) => {
 app.get('/api/messages', wrap(async (req, res) => {
   const id = String(req.query.conversationId || '');
   if (!id) return res.json({ messages: [] });
-  const r = await q(`WITH r AS (UPDATE conversations SET unread_count=0 WHERE id=$1::bigint RETURNING id)
+  // El UPDATE solo si de verdad hay no leídos: así abrir un chat ya leído no escribe
+  // (ni espera bloqueos) en cada carga.
+  const r = await q(`WITH r AS (UPDATE conversations SET unread_count=0 WHERE id=$1::bigint AND unread_count > 0 RETURNING id)
     SELECT id, conversation_id, direction, type, text, template, media_url, media_mime, media_filename,
       (media_data IS NOT NULL) AS has_blob, status, channel, sent_by, EXTRACT(EPOCH FROM created_at)*1000 AS timestamp
       FROM messages WHERE conversation_id=$1::bigint ORDER BY created_at ASC`, [id]);

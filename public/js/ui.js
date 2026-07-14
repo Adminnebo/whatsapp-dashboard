@@ -178,6 +178,16 @@
       this.renderDetails(conv);
     },
 
+    // Placeholder mientras llegan los mensajes (evita el hilo en negro).
+    showThreadLoading(on) {
+      const box = $('#messages');
+      if (!box) return;
+      const prev = box.querySelector('.thread__loading');
+      if (!on) { if (prev) prev.remove(); return; }
+      if (prev || box.children.length) return;      // ya hay contenido: no molestamos
+      box.appendChild(el('div', 'thread__loading', '<span class="spinner"></span> Cargando mensajes…'));
+    },
+
     // ¿la url o el mime corresponden a un PDF?
     isPdf(url, mime) { return mime === 'application/pdf' || /\.pdf($|\?)/i.test(url || ''); },
 

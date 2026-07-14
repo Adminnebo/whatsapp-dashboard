@@ -139,6 +139,18 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 [data-theme="dark"] .bot-toggle--on { background: rgba(26,161,121,.2); color: #34d399; }
 [data-theme="dark"] .bot-toggle--off { background: rgba(255,255,255,.06); color: var(--text-mute); }
 .bot-toggle.is-loading { opacity: .55; pointer-events: none; }
+
+/* cargando mensajes (evita que el hilo se vea vacío mientras llega la respuesta) */
+.thread__loading {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  margin: auto; padding: 20px; font-size: 13px; color: var(--text-soft);
+}
+.spinner {
+  width: 15px; height: 15px; border-radius: 50%;
+  border: 2px solid var(--border); border-top-color: var(--brand);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .conn {
   font-size: 10px; font-weight: 700; letter-spacing: .5px;
   padding: 3px 8px; border-radius: 20px;
