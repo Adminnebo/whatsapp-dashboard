@@ -171,12 +171,22 @@
       if (Store.activeId === conv.id) UI.renderDetails(conv);
     },
 
-    // Lee el custom field "Bot Status" de GHL y refleja el estado abierta/cerrada.
+    // El estado del botón (CAMILA ON/OFF) NO espera a GHL: sale del flag handoff que
+    // ya viene con la lista de conversaciones, así se ve al instante al abrir el chat.
+    // Esto solo reconcilia: si GHL dice STOP y nosotros no lo sabíamos (alguien lo cambió
+    // en el CRM), lo marcamos y lo guardamos. No hacemos lo contrario: apagar a Camila
+    // solo se levanta con el botón CAMILA ON, para no pisar un handoff recién puesto.
     applyBotStatus(conv) {
       const entry = conv && conv.contactId ? Store.ghlByContact[conv.contactId] : null;
-      const cf = entry && entry.contact ? (entry.contact.customFields || []) : [];
-      const bs = cf.find(f => f.name === 'Bot Status');
-      if (bs) conv.status = (String(bs.value).trim().toUpperCase() === 'STOP') ? 'closed' : 'open';
+      if (!entry || !entry.contact) return;                      // GHL no respondió: no tocamos nada
+      const cf = entry.contact.customFields || [];
+      const bs = cf.find(f => f.name === 'Bot Status');          // los vacíos no llegan: ausencia = encendida
+      const closed = !!(bs && String(bs.value).trim().toUpperCase() === 'STOP');
+      if (!closed || Store.isHandoff(conv)) return;              // ya coincide
+      conv.handoff = true;
+      Store.handoffIds.add(conv.contactId);
+      UI.renderList(); UI.renderThread();
+      Api.setGhlField(conv.contactId, 'STOP').catch(() => {});   // persiste el estado en la base
     },
 
     // Enciende / apaga a Camila para este contacto (escribe bot_status en GHL).

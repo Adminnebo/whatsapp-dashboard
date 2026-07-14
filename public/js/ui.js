@@ -346,9 +346,11 @@
         } else { cfSec.hidden = true; cfBox.innerHTML = ''; }
       }
 
+      // Camila OFF = handoff. Sale del flag que ya trae la conversación (instantáneo),
+      // no de la respuesta de GHL: así el botón nunca contradice al aviso rojo.
       const ct = $('#convToggle'), ctl = $('#convToggleLabel');
       if (ct) {
-        const closed = conv.status === 'closed';   // cerrada = Camila apagada para este contacto
+        const closed = Store.isHandoff(conv);
         ct.classList.toggle('pill-toggle--off', closed);
         ct.classList.toggle('pill-toggle--on', !closed);
         if (ctl) ctl.textContent = closed ? 'CAMILA OFF' : 'CAMILA ON';
