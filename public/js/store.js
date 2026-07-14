@@ -49,7 +49,7 @@
     templates: [],        // plantillas aprobadas en Meta (se cargan de /api/wa-templates)
     templatesError: null,
     activeId: null,
-    filter: 'all',       // all | unread | starred
+    filter: 'all',       // all | unread | handoff | whatsapp | instagram | facebook | pagina_web
     search: '',
 
     // --- mutadores ---
@@ -89,10 +89,11 @@
       return !!c.handoff || !!(c.contactId && this.handoffIds.has(c.contactId));
     },
     visibleConversations() {
+      const CANALES = ['whatsapp', 'instagram', 'facebook', 'pagina_web'];
       let list = this.conversations.slice();
       if (this.filter === 'unread')  list = list.filter(c => c.unreadCount > 0);
-      if (this.filter === 'starred') list = list.filter(c => c.starred);
       if (this.filter === 'handoff') list = list.filter(c => this.isHandoff(c));
+      if (CANALES.includes(this.filter)) list = list.filter(c => (c.channel || 'whatsapp') === this.filter);
       if (this.search) {
         const q = this.search.toLowerCase();
         list = list.filter(c =>

@@ -73,15 +73,19 @@
       b.textContent = 'LIVE';
     },
 
-    // ---------- contador de la pestaña Handoff ----------
-    // Cuenta CONVERSACIONES en handoff, no contactos marcados: si se borra una
-    // conversación, su contacto ya no debe sumar aquí.
+    // ---------- contadores de las pestañas ----------
+    // Cuenta CONVERSACIONES, no contactos marcados: si se borra una conversación,
+    // su contacto ya no debe sumar en handoff.
     renderHandoffCount() {
-      const n = (Store.conversations || []).filter(c => Store.isHandoff(c)).length;
-      const el2 = $('#handoffCount');
-      if (el2) el2.textContent = n > 0 ? ' ' + n : '';
-      const tab = document.querySelector('.tab[data-filter="handoff"]');
-      if (tab) tab.classList.toggle('tab--has', n > 0);
+      const convs = Store.conversations || [];
+      const marca = (filtro, n, id) => {
+        const el2 = $('#' + id);
+        if (el2) el2.textContent = n > 0 ? (n > 99 ? '99+' : String(n)) : '';
+        const tab = document.querySelector(`.tab[data-filter="${filtro}"]`);
+        if (tab) tab.classList.toggle('tab--has', n > 0);
+      };
+      marca('handoff', convs.filter(c => Store.isHandoff(c)).length, 'handoffCount');
+      marca('unread', convs.filter(c => c.unreadCount > 0).length, 'unreadCount');
     },
 
     // ---------- botón prender/apagar chatbot ----------

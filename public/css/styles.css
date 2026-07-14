@@ -167,13 +167,32 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .search svg { width: 18px; height: 18px; color: var(--text-mute); }
 .search input { flex: 1; border: none; background: none; outline: none; color: var(--text); }
 
-.tabs { display: flex; gap: 4px; }
+/* pestañas de la lista: solo iconos (todas, no leídas, canales, handoff) */
+.tabs { display: flex; gap: 2px; }
 .tab {
-  padding: 8px 12px; font-size: 13px; font-weight: 500; color: var(--text-soft);
-  border-bottom: 2px solid transparent; transition: color .15s, border-color .15s;
+  position: relative; flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  padding: 9px 0; color: var(--text-soft); opacity: .55;
+  border-bottom: 2px solid transparent; border-radius: 8px 8px 0 0;
+  transition: opacity .15s, color .15s, border-color .15s, background .12s;
 }
-.tab:hover { color: var(--text); }
-.tab--active { color: var(--brand); border-color: var(--brand); font-weight: 600; }
+.tab svg { width: 18px; height: 18px; fill: currentColor; }
+.tab:hover { opacity: 1; background: var(--hover); }
+.tab--active { opacity: 1; color: var(--brand); border-color: var(--brand); }
+/* cada canal con su color de marca, para reconocerlos de un vistazo */
+.tab--wa   { color: #25d366; }
+.tab--ig   { color: #e1306c; }
+.tab--fb   { color: #0084ff; }
+.tab--web  { color: #6b7cff; }
+.tab--ch.tab--active { border-color: currentColor; }
+/* contadores (no leídas / handoff) */
+.tab__count {
+  position: absolute; top: 2px; right: 50%; transform: translateX(20px);
+  min-width: 15px; height: 15px; padding: 0 4px; border-radius: 8px;
+  background: var(--brand); color: #fff; font-size: 9px; font-weight: 800;
+  display: none; place-items: center; line-height: 1;
+}
+.tab--has .tab__count { display: grid; }
 
 .list__body { flex: 1; overflow-y: auto; }
 
@@ -227,8 +246,10 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 [data-theme="dark"] .conv--handoff .conv__name { color: #fca5a5; }
 .conv__pin { font-size: 11px; }
 .tab__count { font-weight: 700; }
-.tab--handoff.tab--has { color: #dc2626; font-weight: 700; }
-[data-theme="dark"] .tab--handoff.tab--has { color: #fca5a5; }
+.tab--handoff.tab--has { color: #dc2626; opacity: 1; }
+.tab--handoff.tab--has .tab__count { background: #dc2626; }
+.tab--handoff.tab--active { border-color: #dc2626; color: #dc2626; }
+[data-theme="dark"] .tab--handoff.tab--has { color: #f87171; }
 
 /* aviso rojo en la cabecera del hilo cuando la conversación está en handoff */
 .handoff-banner { display: none; }
