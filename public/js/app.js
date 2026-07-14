@@ -613,7 +613,9 @@
       // abierta/cerrada (toggle; cerrar escribe STOP en GHL)
       $('#convToggle').addEventListener('click', () => {
         const c = Store.activeConversation(); if (!c) return;
-        this.setStatus(c.status === 'closed' ? 'open' : 'closed');
+        // Decide con el MISMO dato que pinta la etiqueta (handoff). Si usáramos c.status
+        // podría estar desfasado y el botón mandaría OFF cuando ya dice OFF.
+        this.setStatus(Store.isHandoff(c) ? 'open' : 'closed');
       });
       // plantillas
       $('#btnTemplate').addEventListener('click', () => {
