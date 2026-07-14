@@ -42,6 +42,7 @@
     <button class="tab tab--active" data-tab="resumen" role="tab">📈 Resumen</button>
     <button class="tab" data-tab="mensajes" role="tab">💬 Mensajes</button>
     <button class="tab" data-tab="pipeline" role="tab">🗂️ Pipeline</button>
+    <button class="tab" data-tab="cotizaciones" role="tab">📄 Cotizaciones</button>
     <button class="tab" data-tab="registros" role="tab">📋 Registros</button>
   </nav>
 
@@ -141,6 +142,37 @@
       </section>
     </div>
 
+    <!-- Pestaña: Cotizaciones (datos de MSSQL, PDF de Supabase) -->
+    <div class="tabpanel" id="tabCotizaciones" hidden>
+      <section class="card card--wide">
+        <div class="card__head">
+          <h2>Cotizaciones</h2>
+          <input type="search" id="quoSearch" class="search-input" placeholder="Buscar cliente, RNC, teléfono o nº…" autocomplete="off" />
+          <button class="icon-btn" id="quoRefresh" title="Actualizar">↻</button>
+        </div>
+        <div class="quo__recap" id="quoRecap"></div>
+        <div class="tablewrap">
+          <table class="msgs quotes" id="quotesTable">
+            <thead>
+              <tr>
+                <th class="quo__exp"></th>
+                <th>Nº</th>
+                <th>Cliente</th>
+                <th>Fecha</th>
+                <th class="num">ITBIS</th>
+                <th class="num">Total</th>
+                <th>Estado</th>
+                <th>PDF</th>
+              </tr>
+            </thead>
+            <tbody id="quotesBody"><tr><td colspan="8" class="msgs__empty">Cargando…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pager" id="quotesPager"></div>
+        <p class="card__note">Haz clic en una fila para desplegar los productos cotizados. Los datos vienen de la base de cotizaciones (MSSQL) y el PDF de Supabase.</p>
+      </section>
+    </div>
+
     <!-- Pestaña: Registros (acciones de la interfaz) -->
     <div class="tabpanel" id="tabRegistros" hidden>
       <section class="card card--wide">
@@ -186,6 +218,7 @@
   <script src="js/auth.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/pipeline.js"></script>
+  <script src="js/quotes.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
