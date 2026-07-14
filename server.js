@@ -106,7 +106,9 @@ const metaError = j => (j && j.error && (j.error.error_user_msg || j.error.messa
 // El id de la cuenta de WhatsApp (WABA) hace falta para listar plantillas. Si no
 // está en el entorno lo deducimos del propio token (debug_token nos dice sobre qué
 // WABA tiene permisos) y lo cacheamos.
-let _waba = process.env.WHATSAPP_WABA_ID || '';
+// Cuenta de WhatsApp Business (WABA) de Nebo. No es un secreto (es un id), así que
+// va como valor por defecto; se puede sobreescribir con WHATSAPP_WABA_ID.
+let _waba = process.env.WHATSAPP_WABA_ID || '403775332809575';
 async function wabaId() {
   if (_waba) return _waba;
   if (!WA_TOKEN) return '';
