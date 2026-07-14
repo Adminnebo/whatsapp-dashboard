@@ -275,6 +275,8 @@
         const res = await Api.sendMessage(payload);
         optimistic.id = res.id || optimistic.id;
         optimistic.status = res.status || 'delivered';
+        // el proveedor (Meta o GHL) puede rechazar el mensaje aunque el HTTP sea 200
+        if (res.sent === false) UI.toast('No se pudo enviar: ' + (res.error || 'lo rechazó el proveedor'));
       } catch (e) {
         optimistic.status = 'failed';
         UI.toast('Error al enviar: ' + e.message);
@@ -313,7 +315,7 @@
         if (res && res.id) optimistic.id = res.id;
         if (res && res.sent === false) {
           optimistic.status = 'failed';
-          UI.toast('Guardado, pero WhatsApp no lo entregó (¿fuera de la ventana de 24 h?)');
+          UI.toast('Guardado, pero no se entregó: ' + (res.error || 'lo rechazó el proveedor'));
         } else {
           optimistic.status = 'delivered';
           UI.toast('Adjunto enviado');

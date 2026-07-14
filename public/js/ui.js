@@ -171,8 +171,8 @@
       else box.scrollTop = prevScroll;
       this._threadConvId = conv.id;
 
-      // aviso ventana 24h (solo si el último entrante fue hace +24h)
-      const outOfWindow = conv.lastInbound && (Date.now() - conv.lastInbound) > 24 * 3600 * 1000;
+      // aviso ventana 24h: es una regla de WhatsApp (plantillas de Meta), no de los demás canales
+      const outOfWindow = conv.channel === 'whatsapp' && conv.lastInbound && (Date.now() - conv.lastInbound) > 24 * 3600 * 1000;
       $('#windowWarn').hidden = !outOfWindow;
 
       this.renderDetails(conv);

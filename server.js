@@ -101,6 +101,41 @@ async function graph(pathname) {
 }
 // Mensaje de error legible que devuelve Meta (para enseñárselo al agente tal cual).
 const metaError = j => (j && j.error && (j.error.error_user_msg || j.error.message)) || 'Error de Meta';
+// Ídem para GHL, que devuelve el error de tres formas distintas: texto, array de
+// textos, u objeto anidado ({"message":{"error":"Contact ... not found"}}).
+const ghlError = (j, status) => {
+  let m = j && (j.message || j.error);
+  if (Array.isArray(m)) return m.join('; ');
+  if (m && typeof m === 'object') m = m.error || m.message || JSON.stringify(m);
+  return m || ('GHL respondió ' + status);
+};
+
+// ── Envío por GoHighLevel (Instagram, Facebook y live chat de la web) ────────
+// WhatsApp sigue saliendo por la Cloud API de Meta; el resto de canales van por la
+// API de conversaciones de GHL, que es quien tiene conectadas esas bandejas.
+const GHL_MSG_TYPE = { instagram: 'IG', facebook: 'FB', pagina_web: 'Live_Chat', whatsapp: 'WhatsApp' };
+async function ghlSendMessage({ channel, contactId, text, attachments }) {
+  const type = GHL_MSG_TYPE[channel];
+  if (!type) return { ok: false, error: 'Canal no soportado: ' + channel };
+  if (!contactId) return { ok: false, error: 'El contacto no tiene ID de GoHighLevel' };
+  if (!GHL_PIT) return { ok: false, error: 'Falta el token de GoHighLevel' };
+
+  const body = { type, contactId };
+  if (text) body.message = text;
+  if (attachments && attachments.length) body.attachments = attachments;
+
+  // La API de conversaciones usa otra versión de cabecera que el resto de GHL.
+  const { ok, status, json } = await ghl('/conversations/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Version: '2021-04-15' },
+    body: JSON.stringify(body)
+  });
+  const messageId = json && (json.messageId ||
+    (Array.isArray(json.messageIds) && json.messageIds[0]) ||
+    (json.msg && json.msg.id));
+  if (!ok || !messageId) return { ok: false, error: ghlError(json, status) };
+  return { ok: true, messageId: String(messageId), conversationId: json.conversationId || null };
+}
 
 // ── Plantillas de Meta ───────────────────────────────────────────────────────
 // El id de la cuenta de WhatsApp (WABA) hace falta para listar plantillas. Si no
@@ -597,16 +632,30 @@ app.post('/api/notifications/read', wrap(async (req, res) => {
 // ---- envío por WhatsApp ----
 app.post('/api/send', wrap(async (req, res) => {
   const b = req.body || {};
-  const to = b.to ? String(b.to).replace(/[^\d]/g, '') : null;
-  let wamid = null, sent = false;
-  if (to && WA_TOKEN && WA_PHONE) {
-    const r = await waSend({ messaging_product: 'whatsapp', to, type: 'text', text: { body: b.text || '' } });
-    wamid = r.json && r.json.messages && r.json.messages[0] ? r.json.messages[0].id : null; sent = !!wamid;
+  const n = normalize({ ...b, type: 'text' }, null, 'out');   // ya trae el canal normalizado
+  let msgId = null, sent = false, error = null;
+
+  if (n.channel === 'whatsapp') {
+    const to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
+    if (!to) error = 'El contacto no tiene teléfono';
+    else if (!WA_TOKEN || !WA_PHONE) error = 'WhatsApp no está configurado';
+    else {
+      const r = await waSend({ messaging_product: 'whatsapp', to, type: 'text', text: { body: b.text || '' } });
+      msgId = r.json && r.json.messages && r.json.messages[0] ? r.json.messages[0].id : null;
+      sent = !!msgId;
+      if (!sent) error = metaError(r.json);
+    }
+  } else {
+    // Instagram / Facebook / página web → salen por GoHighLevel
+    const r = await ghlSendMessage({ channel: n.channel, contactId: n.contactId, text: b.text || '' });
+    sent = r.ok; msgId = r.messageId || null; error = r.error || null;
   }
-  const n = normalize({ ...b, wamid, type: 'text' }, null, 'out');
+
+  n.wamid = msgId;
+  n.status = sent ? 'sent' : 'failed';
   n.sentBy = await agentName(req);   // quién lo envió (agente logueado)
   const saved = await saveMessage(n);
-  res.json({ id: saved.id, conversationId: saved.conversationId, status: sent ? 'sent' : 'failed', wamid, sent });
+  res.json({ id: saved.id, conversationId: saved.conversationId, status: n.status, wamid: msgId, sent, error });
 }));
 
 // ---- plantillas de Meta ----
@@ -688,18 +737,42 @@ app.post('/api/send-media', upload.single('file'), wrap(async (req, res) => {
   const n = normalize(b, req.file, 'out');
   n.sentBy = await agentName(req);   // quién lo envió (agente logueado)
   const saved = await saveMessage(n);
-  const to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
-  let wamid = null, sent = false;
-  const mediaUrl = n.mediaUrl || (saved.id ? mediaUrlFor(req, saved.id) : null);   // firmada: Meta la descarga sin auth
-  if (to && WA_TOKEN && WA_PHONE && mediaUrl) {
-    const media = { link: mediaUrl };
-    if (n.type === 'document') media.filename = n.mediaName || 'documento';
-    if (n.text && n.type !== 'audio') media.caption = n.text;
-    const waBody = { messaging_product: 'whatsapp', to, type: n.type }; waBody[n.type] = media;
-    const r = await waSend(waBody);
-    wamid = r.json && r.json.messages && r.json.messages[0] ? r.json.messages[0].id : null; sent = !!wamid;
+
+  // URL firmada del adjunto: la descargan sin cabeceras tanto Meta como GHL.
+  const mediaUrl = n.mediaUrl || (saved.id ? mediaUrlFor(req, saved.id) : null);
+  let msgId = null, sent = false, error = null;
+
+  if (!mediaUrl) {
+    error = 'No se pudo preparar el adjunto';
+  } else if (n.channel === 'whatsapp') {
+    const to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
+    if (!to) error = 'El contacto no tiene teléfono';
+    else if (!WA_TOKEN || !WA_PHONE) error = 'WhatsApp no está configurado';
+    else {
+      const media = { link: mediaUrl };
+      if (n.type === 'document') media.filename = n.mediaName || 'documento';
+      if (n.text && n.type !== 'audio') media.caption = n.text;
+      const waBody = { messaging_product: 'whatsapp', to, type: n.type }; waBody[n.type] = media;
+      const r = await waSend(waBody);
+      msgId = r.json && r.json.messages && r.json.messages[0] ? r.json.messages[0].id : null;
+      sent = !!msgId;
+      if (!sent) error = metaError(r.json);
+    }
+  } else {
+    // Instagram / Facebook / página web → GoHighLevel, con el adjunto por URL
+    const r = await ghlSendMessage({ channel: n.channel, contactId: n.contactId, text: n.text || '', attachments: [mediaUrl] });
+    sent = r.ok; msgId = r.messageId || null; error = r.error || null;
   }
-  res.json({ ok: true, id: saved.id, conversationId: saved.conversationId, wamid, sent });
+
+  // Guardamos el id del proveedor: si luego llega el mismo mensaje por webhook,
+  // el índice único de wamid lo deduplica en vez de duplicar la burbuja.
+  if (saved.id) {
+    try {
+      await q(`UPDATE messages SET wamid = COALESCE($1, wamid), status = $2 WHERE id = $3::bigint`,
+        [msgId, sent ? 'sent' : 'failed', saved.id]);
+    } catch (e) { console.error('send-media update', e.message); }
+  }
+  res.json({ ok: true, id: saved.id, conversationId: saved.conversationId, wamid: msgId, sent, error });
 }));
 
 // ---- estáticos (frontend) ----
