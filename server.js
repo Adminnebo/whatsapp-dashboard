@@ -9,6 +9,7 @@ const path = require('path');
 const express = require('express');
 const multer = require('multer');
 const { q } = require('./db');
+const { waHash } = require('./wahash');
 
 const app = express();
 app.set('trust proxy', true);   // Railway termina el TLS: sin esto req.protocol siempre sería 'http'
@@ -207,7 +208,20 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS charged_usd NUMERIC(12,6);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sent_by TEXT;
+-- Ingesta de replies (contrato n8n): hash estable del wamid para resolver citas,
+-- wamid citado y su hash, y la marca de tiempo real del mensaje. Todo NULLABLE:
+-- compatible con el código viejo y con payloads que no traigan estos campos.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_hash TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS context_id TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS context_hash TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_messages_conv_sent ON messages(conversation_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_messages_hash ON messages(message_hash);
+CREATE INDEX IF NOT EXISTS idx_messages_context_hash ON messages(context_hash);
+-- Backfill idempotente: el histórico ordena por created_at (sent_at queda igual).
+-- Reversible (UPDATE messages SET sent_at = NULL). Tras la primera pasada no toca filas.
+UPDATE messages SET sent_at = created_at WHERE sent_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conv_contact ON conversations(contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT now());
@@ -259,6 +273,17 @@ function esAudioEnMp4(buf, mime) {
 }
 
 function normalize(body, file, direction) {
+  // sentAt (ISO-8601 UTC) es la marca real del mensaje que mandan los workflows nuevos.
+  // save-in trae el timestamp de Meta (precisión de 1s); save-out el reloj de n8n (ms).
+  // Se conserva en segundos (con decimales, para no perder los ms del saliente).
+  // OJO: sentAt SOLO alimenta la columna sent_at (que usa /api/messages para ordenar el
+  // hilo). NO toca `ts` → created_at y last_message_at siguen siendo hora de escritura
+  // (monótona), igual que hoy. Desacoplados a propósito: la lista y scanNoReply no cambian.
+  let sentAtEpoch = null;
+  if (body.sentAt != null && body.sentAt !== '') {
+    const ms = Date.parse(body.sentAt);
+    if (Number.isFinite(ms)) sentAtEpoch = ms / 1000;
+  }
   let ts = body.timestamp;
   if (ts == null || ts === '') ts = Math.floor(Date.now() / 1000);
   else { ts = Number(ts); if (ts > 1e12) ts = Math.floor(ts / 1000); }
@@ -304,14 +329,24 @@ function normalize(body, file, direction) {
   let costUsd = body.costUsd ?? body.cost_usd ?? body.costUSD;
   costUsd = (costUsd === '' || costUsd == null) ? null : Number(costUsd);
   if (!Number.isFinite(costUsd)) costUsd = null;
+  // Id del mensaje: los workflows nuevos mandan `messageId`; se mantiene `wamid` como
+  // alias para no romper nada de lo viejo (ni el send/plantillas que ya lo usan).
+  const wamid = body.messageId || body.wamid || null;
+  // Wamid citado (reply). El multipart lo manda como "" cuando no es reply: se normaliza a null.
+  const rawCtx = body.contextId;
+  const contextId = (rawCtx != null && String(rawCtx).trim() !== '') ? String(rawCtx).trim() : null;
   return {
     contactId: body.contactId != null ? String(body.contactId) : null,
-    name: body.name || null, text, wamid: body.wamid || null, ts, type,
+    name: body.name || null, text, wamid, ts, type,
     direction, status: body.status || (direction === 'in' ? 'received' : 'sent'),
     phone, channel: ch, mediaUrl, mediaMime, mediaName, preview, mediaData, executionMs: execMs, label, model, costUsd,
     chargedUsd: direction === 'out' ? CLIENT_CHARGE_OUT : null,
     // Quién envió el saliente: nombre del agente logueado o el que mande quien llama (p.ej. "Camila" desde n8n).
-    sentBy: body.sentBy != null && String(body.sentBy).trim() !== '' ? String(body.sentBy).trim() : null
+    sentBy: body.sentBy != null && String(body.sentBy).trim() !== '' ? String(body.sentBy).trim() : null,
+    // Resolución de replies: se matchea por hash estable, nunca por id crudo. Ver wahash.js.
+    messageHash: waHash(wamid), contextId, contextHash: waHash(contextId),
+    // Marca real del mensaje (para ordenar). Null si el payload no la trae → el ORDER BY degrada a created_at.
+    sentAt: sentAtEpoch
   };
 }
 
@@ -325,12 +360,12 @@ conv AS (INSERT INTO conversations (contact_id, channel, last_message, last_mess
   ON CONFLICT (contact_id) DO UPDATE SET channel=EXCLUDED.channel, last_message=EXCLUDED.last_message, last_message_at=EXCLUDED.last_message_at, last_direction=EXCLUDED.last_direction, last_status=EXCLUDED.last_status,
     last_inbound=CASE WHEN EXCLUDED.last_direction='in' THEN EXCLUDED.last_message_at ELSE conversations.last_inbound END,
     unread_count=CASE WHEN EXCLUDED.last_direction='in' THEN conversations.unread_count+1 ELSE conversations.unread_count END, status='open', updated_at=now() RETURNING id)
-INSERT INTO messages (conversation_id, wamid, direction, type, text, status, channel, media_url, media_mime, media_filename, media_data, created_at, execution_ms, label, model, cost_usd, charged_usd, sent_by)
-  SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17, $18, $19, $20, $21 FROM conv
+INSERT INTO messages (conversation_id, wamid, direction, type, text, status, channel, media_url, media_mime, media_filename, media_data, created_at, execution_ms, label, model, cost_usd, charged_usd, sent_by, message_hash, context_id, context_hash, sent_at)
+  SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17, $18, $19, $20, $21, $22, $23, $24, to_timestamp($25::double precision) FROM conv
   ON CONFLICT (wamid) DO NOTHING RETURNING id, conversation_id;`;
 
 async function saveMessage(n) {
-  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null];
+  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null, n.messageHash ?? null, n.contextId ?? null, n.contextHash ?? null, n.sentAt ?? null];
   const r = await q(SAVE_SQL, params);
   const row = r.rows[0] || {};
   return { id: row.id != null ? String(row.id) : null, conversationId: row.conversation_id != null ? String(row.conversation_id) : null };
@@ -366,19 +401,49 @@ app.get('/api/messages', wrap(async (req, res) => {
   if (!id) return res.json({ messages: [] });
   // El UPDATE solo si de verdad hay no leídos: así abrir un chat ya leído no escribe
   // (ni espera bloqueos) en cada carga.
-  const r = await q(`WITH r AS (UPDATE conversations SET unread_count=0 WHERE id=$1::bigint AND unread_count > 0 RETURNING id)
-    SELECT id, conversation_id, direction, type, text, template, media_url, media_mime, media_filename,
-      (media_data IS NOT NULL) AS has_blob, status, channel, sent_by, EXTRACT(EPOCH FROM created_at)*1000 AS timestamp
-      FROM messages WHERE conversation_id=$1::bigint ORDER BY created_at ASC`, [id]);
-  const base = originOf(req);
+  // Cita (reply): por cada mensaje con context_hash, se busca el mensaje citado dentro
+  // de la MISMA conversación cuyo message_hash coincide (match por hash estable, nunca por
+  // id crudo — ver wahash.js). Si no resuelve, qt.* queda NULL y se renderiza sin cita.
+  // Orden: coalesce(sent_at, created_at) — degrada a created_at si el payload no trajo
+  // sent_at — con desempate created_at, id (Meta da segundos: dos entrantes empatan).
+  const r = await q(`WITH upd AS (UPDATE conversations SET unread_count=0 WHERE id=$1::bigint AND unread_count > 0 RETURNING id)
+    SELECT m.id, m.conversation_id, m.direction, m.type, m.text, m.template, m.media_url, m.media_mime, m.media_filename,
+      (m.media_data IS NOT NULL) AS has_blob, m.status, m.channel, m.sent_by, m.context_id,
+      EXTRACT(EPOCH FROM COALESCE(m.sent_at, m.created_at))*1000 AS timestamp,
+      qt.id AS q_id, qt.direction AS q_direction, qt.type AS q_type, qt.text AS q_text,
+      qt.media_mime AS q_media_mime, qt.media_filename AS q_media_filename,
+      (qt.media_data IS NOT NULL) AS q_has_blob, qt.media_url AS q_media_url, qt.sent_by AS q_sent_by
+    FROM messages m
+    LEFT JOIN LATERAL (
+      SELECT c.id, c.direction, c.type, c.text, c.media_mime, c.media_filename, c.media_data, c.media_url, c.sent_by
+      FROM messages c
+      WHERE m.context_hash IS NOT NULL AND c.message_hash = m.context_hash
+        AND c.conversation_id = m.conversation_id AND c.id <> m.id
+      ORDER BY c.created_at DESC LIMIT 1
+    ) qt ON true
+    WHERE m.conversation_id=$1::bigint
+    ORDER BY COALESCE(m.sent_at, m.created_at) ASC, m.created_at ASC, m.id ASC`, [id]);
   const messages = r.rows.map(m => {
     let mediaUrl = m.media_url || null;
     if (!mediaUrl && m.has_blob) mediaUrl = mediaUrlFor(req, m.id);
+    // Mensaje citado (si resolvió). El frontend lo pinta como la barra de reply de WhatsApp.
+    let quoted = null;
+    if (m.q_id != null) {
+      let qUrl = m.q_media_url || null;
+      if (!qUrl && m.q_has_blob) qUrl = mediaUrlFor(req, m.q_id);
+      quoted = {
+        id: String(m.q_id), direction: m.q_direction, type: m.q_type || 'text',
+        text: m.q_text || '', mediaUrl: qUrl, mediaMime: m.q_media_mime || null,
+        mediaFilename: m.q_media_filename || null, sentBy: m.q_sent_by || null
+      };
+    }
     return {
       id: String(m.id), conversationId: String(m.conversation_id), direction: m.direction, type: m.type || 'text',
       text: m.text || '', template: m.template || null, mediaUrl, mediaMime: m.media_mime || null,
       mediaFilename: m.media_filename || null, timestamp: Number(m.timestamp) || 0, status: m.status || 'received', channel: m.channel || 'whatsapp',
-      sentBy: m.sent_by || null
+      sentBy: m.sent_by || null,
+      // Presente solo si es un reply que resolvió; el frontend degrada a nada si es null.
+      quoted, quotedMissing: !!m.context_id && m.q_id == null
     };
   });
   res.json({ messages });

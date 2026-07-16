@@ -178,6 +178,7 @@
       if (convChanged || nearBottom) box.scrollTop = box.scrollHeight;
       else box.scrollTop = prevScroll;
       this._threadConvId = conv.id;
+      this._threadContactName = conv.name;   // autor de las citas a mensajes entrantes
 
       // aviso ventana 24h: es una regla de WhatsApp (plantillas de Meta), no de los demás canales
       const outOfWindow = conv.channel === 'whatsapp' && conv.lastInbound && (Date.now() - conv.lastInbound) > 24 * 3600 * 1000;
@@ -224,13 +225,41 @@
       return `<div class="msg__doc js-media-open" data-mtype="document" ${data}>${DOC_ICON}<span class="msg__doc-name">${label}</span><span class="msg__doc-hint">${hint}</span></div>`;
     },
 
+    // Etiqueta corta de un mensaje citado sin texto (nota de voz, foto, PDF…).
+    quoteLabel(q) {
+      if (q.text) return q.text;
+      const t = q.type === 'sticker' ? 'image' : q.type;
+      if (t === 'image') return '📷 Foto';
+      if (t === 'audio') return '🎵 Nota de voz';
+      if (t === 'video') return '🎬 Video';
+      if (t === 'document') return '📄 ' + (q.mediaFilename || 'Documento');
+      return 'Mensaje';
+    },
+
+    // Cita estilo WhatsApp: barra de color + autor + snippet (+ miniatura si es imagen).
+    // Solo se pinta si el backend resolvió la cita (m.quoted). Los replies a mensajes
+    // anteriores a la instalación llegan con quotedMissing y se renderizan sin cita.
+    quoteNode(m) {
+      const q = m.quoted;
+      if (!q) return '';
+      const qOut = q.direction === 'out';
+      const author = qOut ? (q.sentBy || 'Camila') : (this._threadContactName || 'Cliente');
+      const isImg = (q.type === 'image' || q.type === 'sticker') && q.mediaUrl;
+      const thumb = isImg ? `<img class="msg__quote-thumb" src="${esc(q.mediaUrl)}" alt="" loading="lazy">` : '';
+      return `<div class="msg__quote ${qOut ? 'msg__quote--out' : 'msg__quote--in'}" data-goto="${esc(q.id)}">`
+        + `<div class="msg__quote-body"><span class="msg__quote-author">${esc(author)}</span>`
+        + `<span class="msg__quote-text">${esc(this.quoteLabel(q))}</span></div>${thumb}</div>`;
+    },
+
     messageNode(m) {
       const out = m.direction === 'out';
       const cm = chMeta(m.channel);
       const hasMedia = !!m.mediaUrl;
       const node = el('div', 'msg ' + (out ? 'msg--out' : 'msg--in') + (m.type === 'template' ? ' msg--template' : '') + (hasMedia ? ' msg--media' : '') + (m.status === 'failed' ? ' msg--failed' : ''));
+      node.dataset.mid = m.id;   // para saltar a este mensaje desde una cita
       let inner = '';
       if (out && m.sentBy) inner += `<div class="msg__sender">${esc(m.sentBy)}</div>`;
+      inner += this.quoteNode(m);
       if (m.type === 'template') inner += `<div class="msg__tplflag">Plantilla · ${esc(m.template || '')}</div>`;
       if (hasMedia) inner += this.mediaNode(m);
       if (m.text) inner += `<div class="msg__text">${esc(m.text)}</div>`;
@@ -244,7 +273,21 @@
         url: opener.dataset.url, mtype: opener.dataset.mtype,
         mime: opener.dataset.mime, name: opener.dataset.name
       }));
+      // clic en la cita → salta al mensaje original y lo resalta un instante
+      const quote = node.querySelector('.msg__quote');
+      if (quote) quote.addEventListener('click', () => this.scrollToMessage(quote.dataset.goto));
       return node;
+    },
+
+    // Desplaza el hilo hasta el mensaje `id` y lo resalta brevemente (como WhatsApp).
+    scrollToMessage(id) {
+      const box = document.querySelector('#messages');
+      const target = box && box.querySelector(`.msg[data-mid="${id}"]`);
+      if (!target) return;   // el original no está cargado en el hilo actual: no hacemos nada
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.remove('msg--flash');
+      void target.offsetWidth;               // reinicia la animación si se vuelve a clicar
+      target.classList.add('msg--flash');
     },
 
     // ---------- visor de media (lightbox) ----------
