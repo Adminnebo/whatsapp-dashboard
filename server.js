@@ -256,6 +256,25 @@ CREATE TABLE IF NOT EXISTS action_logs (id BIGSERIAL PRIMARY KEY, action TEXT, a
 ALTER TABLE action_logs ADD COLUMN IF NOT EXISTS ref_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_action_logs_created ON action_logs(created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_action_logs_ref ON action_logs(action, ref_id);
+-- Dispositivos extra conectados por QR (WhatsApp Web). El dispositivo NULL es el
+-- principal: Camila por la Cloud API oficial, que sigue funcionando igual.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS device_id TEXT;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS device_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_messages_device ON messages(device_id);
+CREATE INDEX IF NOT EXISTS idx_conv_device ON conversations(device_id);
+CREATE TABLE IF NOT EXISTS wa_devices (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT,
+  status TEXT NOT NULL DEFAULT 'nuevo',      -- nuevo | qr | conectado | desconectado
+  qr TEXT,                                    -- último QR (mientras se empareja)
+  last_seen TIMESTAMPTZ,
+  n8n_url TEXT,
+  creds JSONB,                                -- estado de sesión (sobrevive a reinicios)
+  created_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff BOOLEAN DEFAULT false;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_at TIMESTAMPTZ;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_stopped BOOLEAN DEFAULT false;
@@ -369,6 +388,8 @@ function normalize(body, file, direction) {
     chargedUsd: direction === 'out' ? CLIENT_CHARGE_OUT : null,
     // Quién envió el saliente: nombre del agente logueado o el que mande quien llama (p.ej. "Camila" desde n8n).
     sentBy: body.sentBy != null && String(body.sentBy).trim() !== '' ? String(body.sentBy).trim() : null,
+    // Dispositivo QR del que viene/sale el mensaje. null = el principal (Camila, Cloud API).
+    deviceId: body.deviceId != null && String(body.deviceId).trim() !== '' ? String(body.deviceId).trim() : null,
     // Resolución de replies: se matchea por hash estable, nunca por id crudo. Ver wahash.js.
     messageHash: waHash(wamid), contextId, contextHash: waHash(contextId),
     // Marca real del mensaje (para ordenar). Null si el payload no la trae → el ORDER BY degrada a created_at.
@@ -381,17 +402,17 @@ WITH existing AS (SELECT id FROM contacts WHERE ($1::text IS NOT NULL AND ghl_co
 upd AS (UPDATE contacts SET ghl_contact_id = COALESCE(contacts.ghl_contact_id, $1), name = COALESCE($2, contacts.name), phone = COALESCE($9, contacts.phone) WHERE id = (SELECT id FROM existing) RETURNING id),
 ins AS (INSERT INTO contacts (ghl_contact_id, name, phone) SELECT $1, $2, $9 WHERE NOT EXISTS (SELECT 1 FROM existing) RETURNING id),
 c AS (SELECT id FROM upd UNION ALL SELECT id FROM ins),
-conv AS (INSERT INTO conversations (contact_id, channel, last_message, last_message_at, last_direction, last_status, last_inbound, unread_count, status, updated_at)
-  SELECT c.id, $10, $14, to_timestamp($5::double precision), $7, $8, CASE WHEN $7='in' THEN to_timestamp($5::double precision) ELSE NULL END, CASE WHEN $7='in' THEN 1 ELSE 0 END, 'open', now() FROM c
-  ON CONFLICT (contact_id) DO UPDATE SET channel=EXCLUDED.channel, last_message=EXCLUDED.last_message, last_message_at=EXCLUDED.last_message_at, last_direction=EXCLUDED.last_direction, last_status=EXCLUDED.last_status,
+conv AS (INSERT INTO conversations (contact_id, channel, device_id, last_message, last_message_at, last_direction, last_status, last_inbound, unread_count, status, updated_at)
+  SELECT c.id, $10, $26, $14, to_timestamp($5::double precision), $7, $8, CASE WHEN $7='in' THEN to_timestamp($5::double precision) ELSE NULL END, CASE WHEN $7='in' THEN 1 ELSE 0 END, 'open', now() FROM c
+  ON CONFLICT (contact_id) DO UPDATE SET channel=EXCLUDED.channel, device_id=EXCLUDED.device_id, last_message=EXCLUDED.last_message, last_message_at=EXCLUDED.last_message_at, last_direction=EXCLUDED.last_direction, last_status=EXCLUDED.last_status,
     last_inbound=CASE WHEN EXCLUDED.last_direction='in' THEN EXCLUDED.last_message_at ELSE conversations.last_inbound END,
     unread_count=CASE WHEN EXCLUDED.last_direction='in' THEN conversations.unread_count+1 ELSE conversations.unread_count END, status='open', updated_at=now() RETURNING id)
-INSERT INTO messages (conversation_id, wamid, direction, type, text, status, channel, media_url, media_mime, media_filename, media_data, created_at, execution_ms, label, model, cost_usd, charged_usd, sent_by, message_hash, context_id, context_hash, sent_at)
-  SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17, $18, $19, $20, $21, $22, $23, $24, to_timestamp($25::double precision) FROM conv
+INSERT INTO messages (conversation_id, wamid, direction, type, text, status, channel, media_url, media_mime, media_filename, media_data, created_at, execution_ms, label, model, cost_usd, charged_usd, sent_by, message_hash, context_id, context_hash, sent_at, device_id)
+  SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17, $18, $19, $20, $21, $22, $23, $24, to_timestamp($25::double precision), $26 FROM conv
   ON CONFLICT (wamid) DO NOTHING RETURNING id, conversation_id;`;
 
 async function saveMessage(n) {
-  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null, n.messageHash ?? null, n.contextId ?? null, n.contextHash ?? null, n.sentAt ?? null];
+  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null, n.messageHash ?? null, n.contextId ?? null, n.contextHash ?? null, n.sentAt ?? null, n.deviceId ?? null];
   const r = await q(SAVE_SQL, params);
   const row = r.rows[0] || {};
   return { id: row.id != null ? String(row.id) : null, conversationId: row.conversation_id != null ? String(row.conversation_id) : null };
@@ -401,12 +422,23 @@ async function saveMessage(n) {
 
 app.get('/api/db-setup', wrap(async (_req, res) => { await migrate(); res.json({ ok: true, message: 'Tablas creadas correctamente.' }); }));
 
-app.get('/api/conversations', wrap(async (_req, res) => {
+// ?device=<id> devuelve solo las de ese dispositivo QR.
+// Sin parámetro devuelve las del principal (Camila / Cloud API), que son las que
+// tienen device_id NULL: así el inbox de siempre no cambia de comportamiento.
+app.get('/api/conversations', wrap(async (req, res) => {
+  const device = String(req.query.device || '').trim();
+  const todos = asBool(req.query.all);
+  let filtro = 'WHERE conv.device_id IS NULL';
+  const params = [];
+  if (todos) filtro = '';
+  else if (device) { params.push(device); filtro = 'WHERE conv.device_id = $1'; }
+
   const r = await q(`SELECT conv.id, c.ghl_contact_id, c.name, c.phone, c.email, c.company, c.tags, c.source, c.owner, c.handoff,
-      conv.channel, conv.status, conv.starred, conv.unread_count, conv.last_message, conv.last_direction, conv.last_status,
+      conv.channel, conv.status, conv.starred, conv.unread_count, conv.last_message, conv.last_direction, conv.last_status, conv.device_id,
       EXTRACT(EPOCH FROM conv.last_message_at)*1000 AS last_message_at, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
       FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
-      ORDER BY conv.last_message_at DESC NULLS LAST`);
+      ${filtro}
+      ORDER BY conv.last_message_at DESC NULLS LAST`, params);
   const conversations = r.rows.map(row => {
     const nm = row.name || row.phone || '?';
     return {
@@ -416,6 +448,7 @@ app.get('/api/conversations', wrap(async (_req, res) => {
       lastDirection: row.last_direction || 'in', lastStatus: row.last_status || 'received',
       unreadCount: Number(row.unread_count) || 0, starred: !!row.starred, status: row.status || 'open',
       lastInbound: Number(row.last_inbound) || 0, handoff: !!row.handoff,
+      deviceId: row.device_id || null,
       contact: { email: row.email || '', company: row.company || '', tags: row.tags || [], source: row.source || '', owner: row.owner || '' }
     };
   });

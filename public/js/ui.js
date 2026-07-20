@@ -73,6 +73,14 @@
       b.textContent = 'LIVE';
     },
 
+    // ---------- indicador del dispositivo que se está viendo ----------
+    renderDeviceBadge(nombre, deviceId) {
+      const b = $('#devBadge');
+      if (!b) return;
+      b.hidden = !deviceId;              // en el principal no estorbamos con el badge
+      b.textContent = '📱 ' + nombre;
+    },
+
     // ---------- contadores de las pestañas ----------
     // Cuenta CONVERSACIONES, no contactos marcados: si se borra una conversación,
     // su contacto ya no debe sumar en handoff.

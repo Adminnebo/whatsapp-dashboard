@@ -34,7 +34,10 @@
     // Cargar conversaciones. GET al webhook -> { conversations: [...] }
     // ---------------------------------------------------------------
     async loadConversations() {
-      const data = await http(S().convUrl, { method: 'GET', headers: headers() });
+      // El dispositivo activo decide qué conversaciones se ven (null = principal).
+      const dev = (global.Devices && Devices.actual) || null;
+      const url = S().convUrl + (dev ? (S().convUrl.includes('?') ? '&' : '?') + 'device=' + encodeURIComponent(dev) : '');
+      const data = await http(url, { method: 'GET', headers: headers() });
       return {
         conversations: data.conversations || data || [],
         messagesByConv: data.messagesByConv || {}

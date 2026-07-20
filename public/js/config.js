@@ -16,6 +16,9 @@ window.WA_CONFIG = {
   botSetUrl:    '/api/bot-set',
   handoffUrl:   '/api/handoff',
 
+  // Servicio de dispositivos por QR (se puede cambiar desde el panel Dispositivos).
+  devicesUrl:   '',
+
   pollInterval: 10000,
 
   // Las plantillas ya no se definen aquí: se leen de Meta (/api/wa-templates)

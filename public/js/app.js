@@ -19,6 +19,7 @@
       this.loadBotState();
       this.loadHandoff();
       this.loadTemplates();
+      if (global.Devices) global.Devices.init();
       if (global.Notifs) global.Notifs.init();
     },
 
@@ -270,7 +271,10 @@
       };
 
       try {
-        const res = await Api.sendMessage(payload);
+        // Si estamos viendo un dispositivo QR, sale por su servicio, no por Meta.
+        const res = (global.Devices && Devices.actual)
+          ? await Devices.enviar(conv, text).then(r => ({ id: optimistic.id, status: r && r.ok ? 'delivered' : 'failed', sent: !!(r && r.ok) }))
+          : await Api.sendMessage(payload);
         optimistic.id = res.id || optimistic.id;
         optimistic.status = res.status || 'delivered';
         // el proveedor (Meta o GHL) puede rechazar el mensaje aunque el HTTP sea 200
