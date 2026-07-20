@@ -24,6 +24,32 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const HANDOFF_TAG = process.env.HANDOFF_TAG || 'handoff';
 const CLIENT_CHARGE_OUT = Number(process.env.CLIENT_CHARGE_OUT || 0.03); // lo que se cobra por saliente
 
+// ── CORS para la app móvil ───────────────────────────────────────────────────
+// La app de Capacitor no se sirve desde este dominio: en Android llega como
+// https://localhost y en iOS como capacitor://localhost. Sin esto, el navegador
+// embebido bloquea todas las llamadas al API. La web propia va por mismo origen
+// y no manda Origin, así que no se ve afectada.
+const CORS_OK = new Set([
+  'capacitor://localhost',            // iOS
+  'ionic://localhost',
+  'http://localhost',                 // Android (WebView)
+  'https://localhost',
+  ...String(process.env.CORS_EXTRA || '').split(',').map(s => s.trim()).filter(Boolean)
+]);
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (origin && (CORS_OK.has(origin) || /^https?:\/\/localhost(:\d+)?$/.test(origin))) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, x-dashboard-token');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    res.set('Access-Control-Max-Age', '86400');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);   // preflight
+  next();
+});
+
 app.use(express.json({ limit: process.env.JSON_LIMIT || '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 * 1024 * 1024 } });
