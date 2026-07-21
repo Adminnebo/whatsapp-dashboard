@@ -252,6 +252,7 @@ CREATE INDEX IF NOT EXISTS idx_conv_contact ON conversations(contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT now());
 INSERT INTO app_settings (key, value) VALUES ('bot_enabled', 'true') ON CONFLICT (key) DO NOTHING;
+INSERT INTO app_settings (key, value) VALUES ('handoff_auto_return_mins', '0') ON CONFLICT (key) DO NOTHING;
 CREATE TABLE IF NOT EXISTS action_logs (id BIGSERIAL PRIMARY KEY, action TEXT, actor_name TEXT, actor_email TEXT, contact_id TEXT, detail TEXT, created_at TIMESTAMPTZ DEFAULT now());
 ALTER TABLE action_logs ADD COLUMN IF NOT EXISTS ref_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_action_logs_created ON action_logs(created_at DESC);
@@ -596,6 +597,24 @@ app.post('/api/bot-set', wrap(async (req, res) => {
   await q(`INSERT INTO app_settings (key,value,updated_at) VALUES ('bot_enabled',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [val]);
   await logAction(req, val === 'true' ? 'bot_on' : 'bot_off', null, val === 'true' ? 'Encendió el bot' : 'Apagó el bot');
   res.json({ ok: true, active: val === 'true' });
+}));
+
+// Minutos tras los cuales un chat en handoff vuelve a encender a Camila.
+// 0 (o vacío) = desactivado. Se guarda en app_settings.
+async function getHandoffReturnMins() {
+  const r = await q(`SELECT value FROM app_settings WHERE key='handoff_auto_return_mins'`);
+  const n = Math.floor(Number(r.rows[0] && r.rows[0].value));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+app.get('/api/handoff-config', wrap(async (_req, res) => res.json({ minutes: await getHandoffReturnMins() })));
+app.post('/api/handoff-config', wrap(async (req, res) => {
+  let mins = Math.floor(Number(req.body && req.body.minutes));
+  if (!Number.isFinite(mins) || mins < 0) mins = 0;
+  await q(`INSERT INTO app_settings (key,value,updated_at) VALUES ('handoff_auto_return_mins',$1,now())
+           ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [String(mins)]);
+  await logAction(req, 'handoff_config', null,
+    mins ? `Auto-return de handoff: ${mins} min` : 'Auto-return de handoff: desactivado');
+  res.json({ ok: true, minutes: mins });
 }));
 
 // Estado combinado por contacto: ¿debe responder el bot a esta persona?
@@ -1066,5 +1085,37 @@ async function scanHandoff() {
 }
 setInterval(scanHandoff, 60 * 1000);       // cada minuto
 setTimeout(scanHandoff, 5 * 1000);         // primera pasada al arrancar
+
+// ── Auto-return: chats que llevan X minutos en handoff → reactivar Camila ─────
+// El tiempo se configura desde la interfaz (Ajustes). 0 = desactivado.
+// Reactivar = lo mismo que el botón "Camila ON": bot_status='' en GHL, se quita
+// la etiqueta handoff y se limpia el estado en la DB.
+async function scanHandoffAutoReturn() {
+  if (!GHL_PIT || !LOCATION_ID) return;
+  try {
+    const mins = await getHandoffReturnMins();
+    if (!mins) return;   // desactivado
+    const vencidos = await q(
+      `SELECT ghl_contact_id, EXTRACT(EPOCH FROM (now() - handoff_at))::bigint AS secs
+         FROM contacts
+        WHERE handoff = true AND handoff_at IS NOT NULL AND ghl_contact_id IS NOT NULL
+          AND handoff_at < now() - make_interval(mins => $1::int)`, [mins]);
+    for (const c of vencidos.rows) {
+      try {
+        // Si GHL falla, no tocamos la DB: se reintenta en el próximo ciclo.
+        if (!await setBotStatus(c.ghl_contact_id, '')) continue;
+        await quitarTagHandoff(c.ghl_contact_id).catch(e => console.error('auto-return quitarTag', e.message));
+        await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
+                 WHERE ghl_contact_id = $1`, [c.ghl_contact_id]);
+        await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
+                 VALUES ('conv_open', 'Sistema (auto-return)', $1, $2)`,
+          [c.ghl_contact_id, `Camila reactivada automáticamente tras ${mins} min en handoff`]);
+        console.log('[handoff] auto-return: Camila ON para', c.ghl_contact_id, `(${Math.round((c.secs||0)/60)} min)`);
+      } catch (e) { console.error('auto-return', c.ghl_contact_id, e.message); }
+    }
+  } catch (e) { console.error('scanHandoffAutoReturn', e.message); }
+}
+setInterval(scanHandoffAutoReturn, 60 * 1000);   // cada minuto
+setTimeout(scanHandoffAutoReturn, 20 * 1000);    // primera pasada al arrancar
 
 app.listen(PORT, () => console.log(`Dashboard escuchando en :${PORT}`));

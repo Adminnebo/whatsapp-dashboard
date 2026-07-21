@@ -127,6 +127,21 @@
     },
 
     // ---------------------------------------------------------------
+    // Auto-return de handoff: minutos tras los cuales Camila se reactiva
+    // sola en un chat en handoff. 0 = desactivado. Se guarda en el servidor.
+    // ---------------------------------------------------------------
+    async getHandoffConfig() {
+      const url = S().handoffConfigUrl || (global.WA_CONFIG || {}).handoffConfigUrl;
+      if (!url) return null;
+      return await http(url, { method: 'GET', headers: headers() });
+    },
+    async setHandoffConfig(minutes) {
+      const url = S().handoffConfigUrl || (global.WA_CONFIG || {}).handoffConfigUrl;
+      if (!url) return null;
+      return await http(url, { method: 'POST', headers: headers(), body: JSON.stringify({ minutes: Number(minutes) || 0 }) });
+    },
+
+    // ---------------------------------------------------------------
     // Enviar un adjunto por WhatsApp (multipart). Sube el archivo, se guarda
     // en la DB (aparece en el hilo) y se envía por la Cloud API.
     // Devuelve { ok, id, conversationId, wamid, sent }.

@@ -375,25 +375,7 @@
       }
       $('#detFields').innerHTML = fields.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
 
-      // oportunidades
-      const oppsSec = $('#detOppsSection'), oppsBox = $('#detOpps');
-      const opps = (entry && entry.opportunities) || [];
-      if (oppsSec && oppsBox) {
-        if (opps.length) {
-          oppsSec.hidden = false;
-          oppsBox.innerHTML = opps.map(o => {
-            const st = (o.status || '').toLowerCase();
-            let money = '';
-            if (o.monetaryValue != null) { try { money = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(o.monetaryValue); } catch (_) { money = '$' + o.monetaryValue; } }
-            const path = [o.pipeline, o.stage].filter(Boolean).join(' ▸ ');
-            return `<div class="opp">
-              <div class="opp__top"><span class="opp__name">${esc(o.name || 'Oportunidad')}</span><span class="opp__status opp__status--${esc(st)}">${esc(o.status || '')}</span></div>
-              ${path ? `<div class="opp__path">${esc(path)}</div>` : ''}
-              ${money ? `<div class="opp__value">${esc(money)}</div>` : ''}
-            </div>`;
-          }).join('');
-        } else { oppsSec.hidden = true; oppsBox.innerHTML = ''; }
-      }
+      // (las oportunidades de GHL ya no se muestran en el panel de contacto)
 
       // (los campos personalizados de GHL ya no se muestran: repetían el último mensaje
       //  y el Bot Status, que ya salen en el hilo y en el botón CAMILA ON/OFF)

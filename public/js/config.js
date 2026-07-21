@@ -15,6 +15,7 @@ window.WA_CONFIG = {
   botStateUrl:  '/api/bot-state',
   botSetUrl:    '/api/bot-set',
   handoffUrl:   '/api/handoff',
+  handoffConfigUrl: '/api/handoff-config',
 
   // Servicio de dispositivos por QR (se puede cambiar desde el panel Dispositivos).
   devicesUrl:   '',
