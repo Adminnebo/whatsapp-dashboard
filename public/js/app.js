@@ -539,38 +539,30 @@
     },
 
     // ---------- ajustes ----------
+    // Solo se expone el auto-return de handoff. Las URLs/polling/token quedan
+    // fijos por config.js (mismo origen) y ya no se editan desde la interfaz.
     openSettings() {
-      const s = Store.settings;
-      $('#cfgSendUrl').value = s.sendUrl;
-      $('#cfgConvUrl').value = s.convUrl;
-      $('#cfgMsgUrl').value = s.msgUrl;
-      $('#cfgDeleteUrl').value = s.deleteUrl;
-      $('#cfgGhlUrl').value = s.ghlUrl;
-      $('#cfgGhlFieldUrl').value = s.ghlFieldUrl;
-      $('#cfgPoll').value = String(s.pollInterval);
-      $('#cfgToken').value = s.token;
       $('#settingsModal').hidden = false;
+      // Auto-return de handoff: valor real del servidor (minutos).
+      const rIn = $('#cfgHandoffReturn'), rUnit = $('#cfgHandoffUnit');
+      if (rIn) {
+        rIn.value = ''; if (rUnit) rUnit.value = '1';
+        Api.getHandoffConfig().then(cfg => {
+          const m = (cfg && Number(cfg.minutes)) || 0;
+          if (m && m % 60 === 0) { rIn.value = String(m / 60); if (rUnit) rUnit.value = '60'; }
+          else { rIn.value = String(m); if (rUnit) rUnit.value = '1'; }
+        }).catch(() => {});
+      }
     },
     async saveSettings() {
-      Object.assign(Store.settings, {
-        sendUrl: $('#cfgSendUrl').value.trim(),
-        convUrl: $('#cfgConvUrl').value.trim(),
-        msgUrl: $('#cfgMsgUrl').value.trim(),
-        deleteUrl: $('#cfgDeleteUrl').value.trim(),
-        ghlUrl: $('#cfgGhlUrl').value.trim(),
-        ghlFieldUrl: $('#cfgGhlFieldUrl').value.trim(),
-        pollInterval: Number($('#cfgPoll').value),
-        token: $('#cfgToken').value.trim()
-      });
-      if (!Store.settings.convUrl) {
-        UI.toast('Falta la URL de conversaciones');
+      // Auto-return de handoff (setting del servidor, no localStorage).
+      const rIn = $('#cfgHandoffReturn'), rUnit = $('#cfgHandoffUnit');
+      if (rIn) {
+        const mins = Math.max(0, Math.floor((Number(rIn.value) || 0) * (Number(rUnit && rUnit.value) || 1)));
+        try { await Api.setHandoffConfig(mins); } catch (e) { UI.toast('No se pudo guardar el auto-return'); }
       }
-      Store.saveSettings(Store.settings);
       $('#settingsModal').hidden = true;
-      UI.renderConnBadge();
       UI.toast('Ajustes guardados');
-      await this.refreshData();
-      this.startPolling();
     },
 
     // ---------- eventos ----------
