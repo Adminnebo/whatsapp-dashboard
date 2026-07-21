@@ -194,7 +194,11 @@
     // ---------------------------------------------------------------
     async poll() {
       try {
-        const data = await http(S().convUrl, { method: 'GET', headers: headers() });
+        // Igual que loadConversations: el sondeo debe respetar el dispositivo
+        // activo, si no reemplazaría la lista por la del principal cada ciclo.
+        const dev = (global.Devices && Devices.actual) || null;
+        const url = S().convUrl + (dev ? (S().convUrl.includes('?') ? '&' : '?') + 'device=' + encodeURIComponent(dev) : '');
+        const data = await http(url, { method: 'GET', headers: headers() });
         return { conversations: data.conversations || data || [] };
       } catch (e) {
         return { error: e.message };
