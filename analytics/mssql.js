@@ -152,4 +152,23 @@ async function quoteDetail(nfactura) {
   };
 }
 
-module.exports = { sql, getMssql, quotesStat, quotesList, quoteDetail };
+// Números de cotización (nfactura) más recientes, para detectar huecos en la
+// secuencia. Solo los últimos `window` números por defecto (no todo el histórico).
+async function quoteNumbers(windowSize = 3000) {
+  if (!process.env.MSSQL_SERVER) return { available: false, numbers: [] };
+  const table = process.env.MSSQL_QUOTES_TABLE || 'iCotizacionesWebIA';
+  try {
+    const p = await getMssql();
+    const r = await p.request()
+      .input('w', sql.Int, Math.max(10, Number(windowSize) || 3000))
+      .query(`SELECT TOP (@w) nfactura FROM [${table}]
+              WHERE nfactura IS NOT NULL ORDER BY nfactura DESC`);
+    const numbers = r.recordset.map(x => Number(x.nfactura)).filter(Number.isFinite);
+    return { available: true, numbers };
+  } catch (e) {
+    pool = null;
+    return { available: false, numbers: [], error: e.message };
+  }
+}
+
+module.exports = { sql, getMssql, quotesStat, quotesList, quoteDetail, quoteNumbers };

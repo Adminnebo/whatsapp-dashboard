@@ -75,6 +75,12 @@ app.use('/api', require('./pipeline'));       // pipeline/oportunidades + webhoo
 app.use('/api', require('./quotes'));         // cotizaciones (MSSQL) + PDF (Supabase)
 app.use('/api', require('./calls'));          // llamadas del agente de voz + webhook n8n
 
+// Vigilancia de la secuencia de cotizaciones: avisa a un webhook si hay huecos.
+const quoteGaps = require('./quoteGaps');
+app.get('/api/quotes/gaps', optionalAuth, wrap(async (_req, res) => {
+  res.json(await quoteGaps.revisar());        // revisión bajo demanda
+}));
+
 app.get('/api/stats', optionalAuth, wrap(async (req, res) => {
   const { from, to } = rangeOf(req);
   const canSeeCost = !authCfg || req.role === 'super_admin'; // costes reales solo super_admin
@@ -285,4 +291,7 @@ app.get('/api/logs', optionalAuth, wrap(async (req, res) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-app.listen(PORT, () => console.log(`Analytics escuchando en :${PORT} (TZ ${TZ})`));
+app.listen(PORT, () => {
+  console.log(`Analytics escuchando en :${PORT} (TZ ${TZ})`);
+  quoteGaps.start();                          // vigila la secuencia de cotizaciones
+});
