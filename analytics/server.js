@@ -6,11 +6,35 @@
 'use strict';
 const path = require('path');
 const express = require('express');
-const sql = require('mssql');
 const { q } = require('./db');
+const { quotesStat } = require('./mssql');
+const { rangeOf } = require('./range');
 const { configured: authCfg, optionalAuth, URL: SB_URL, ANON: SB_ANON } = require('./analyticsAuth');
 
 const app = express();
+
+// ── CORS para la app móvil ───────────────────────────────────────────────────
+// La app de Capacitor no se sirve desde este dominio: iOS llega como
+// capacitor://localhost y Android como https://localhost. Sin esto el WebView
+// bloquea las llamadas. La web propia va por mismo origen y no manda Origin.
+const CORS_OK = new Set([
+  'capacitor://localhost', 'ionic://localhost', 'http://localhost', 'https://localhost',
+  ...String(process.env.CORS_EXTRA || '').split(',').map(s => s.trim()).filter(Boolean)
+]);
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (origin && (CORS_OK.has(origin) || /^https?:\/\/localhost(:\d+)?$/.test(origin))) {
+    res.set('Access-Control-Allow-Origin', origin);
+    res.set('Vary', 'Origin');
+    res.set('Access-Control-Allow-Credentials', 'true');
+    res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    res.set('Access-Control-Max-Age', '86400');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 app.use(express.json({ limit: '2mb' }));   // necesario para POST/PATCH (crear usuarios)
 const PORT = process.env.PORT || 8080;
 const TZ = process.env.TZ_DISPLAY || 'America/Santo_Domingo';
@@ -23,75 +47,33 @@ const COST_CCY = process.env.MSG_COST_CURRENCY || 'USD';
 
 const wrap = fn => (req, res) => Promise.resolve(fn(req, res)).catch(e => { console.error(req.path, e.message); res.status(500).json({ error: e.message }); });
 
-// Rango de fechas: ?from=YYYY-MM-DD&to=YYYY-MM-DD (fechas específicas) o ?days=N|all.
-// 'to' es inclusivo (día completo). Devuelve {from, to} ISO. Mínimo 2000-01-01.
-function rangeOf(req) {
-  const now = Date.now();
-  const minMs = Date.parse('2000-01-01T00:00:00Z');
-  const day = 86400000;
-  let fromMs, toMs;
-  const qf = String(req.query.from || '').trim();
-  const qt = String(req.query.to || '').trim();
-  if (qf || qt) {
-    fromMs = qf ? Date.parse(qf) : minMs;
-    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(qt);       // solo fecha => incluye el día completo
-    toMs = qt ? Date.parse(qt) + (dateOnly ? day : 0) : now;
-    if (isNaN(fromMs)) fromMs = minMs;
-    if (isNaN(toMs)) toMs = now;
-  } else {
-    const days = req.query.days === 'all' ? 100000 : (Number(req.query.days) || 30);
-    fromMs = now - days * day;
-    toMs = now + 1000;
-  }
-  if (fromMs < minMs) fromMs = minMs;
-  if (toMs < fromMs) toMs = fromMs + day;
-  return { from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() };
-}
+// El rango de fechas (?days / ?from&to) se parsea en ./range.js (compartido).
 
-// Cotizaciones: viven en una base MSSQL aparte (site4now). Conexión por env MSSQL_*.
-// Cuenta las filas de la tabla de cotizaciones en el rango de fechas.
-let mssqlPool = null;
-async function getMssql() {
-  if (!process.env.MSSQL_SERVER) return null;
-  if (mssqlPool && mssqlPool.connected) return mssqlPool;
-  try {
-    const pool = new sql.ConnectionPool({
-      server: process.env.MSSQL_SERVER,
-      database: process.env.MSSQL_DATABASE,
-      user: process.env.MSSQL_USER,
-      password: process.env.MSSQL_PASSWORD,
-      port: Number(process.env.MSSQL_PORT || 1433),
-      options: { encrypt: process.env.MSSQL_ENCRYPT === 'true', trustServerCertificate: true },
-      pool: { max: 4, idleTimeoutMillis: 30000 },
-      connectionTimeout: 15000, requestTimeout: 15000
-    });
-    mssqlPool = await pool.connect();
-    mssqlPool.on('error', () => { mssqlPool = null; });
-    return mssqlPool;
-  } catch (e) { mssqlPool = null; throw e; }
-}
-async function quotesStat(from, to) {
-  if (!process.env.MSSQL_SERVER) return { available: false };
-  const table = process.env.MSSQL_QUOTES_TABLE || 'iCotizacionesWebIA';
-  const dateCol = process.env.MSSQL_QUOTES_DATE || 'FechaRegistro';
-  const amountCol = process.env.MSSQL_QUOTES_AMOUNT || 'total';
-  try {
-    const pool = await getMssql();
-    const r = await pool.request()
-      .input('from', sql.DateTime, new Date(from))
-      .input('to', sql.DateTime, new Date(to || Date.now()))
-      .query(`SELECT COUNT(*) AS n, COALESCE(SUM([${amountCol}]),0) AS monto FROM [${table}] WHERE [${dateCol}] >= @from AND [${dateCol}] < @to`);
-    const row = r.recordset[0] || {};
-    return { available: true, count: Number(row.n) || 0, amount: Number(row.monto) || 0 };
-  } catch (e) {
-    mssqlPool = null;
-    return { available: false, error: e.message };
-  }
-}
+// Cotizaciones: los datos viven en una base MSSQL aparte (site4now) y el PDF en
+// Supabase Storage. Consultas centralizadas en ./mssql.js; rutas en ./quotes.js.
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/auth/config', (_req, res) => res.json({ supabaseUrl: SB_URL, supabaseAnonKey: SB_ANON, configured: authCfg }));
 app.use('/api/auth', require('./authUsers')); // /api/auth/me, /users (solo admin/super_admin)
+
+// Proxy de grabaciones: va ABIERTO (antes del gate) porque el <audio> no puede
+// mandar el token de sesión. Se protege con allowlist de hosts (evita SSRF).
+// El origen (swordaisolutions.com) no manda CORS/Content-Length, así que sin
+// esto el reproductor embebido falla; aquí lo re-servimos desde el mismo origen.
+app.get('/api/recordings/proxy', require('./services/recordingProxy').handle);
+
+// ── Gate de plataforma: todo lo demás exige acceso a 'cotizaciones' ──────────
+// Se eximen los webhooks de n8n (llevan su propia API key) y health.
+const { requirePlatform } = require('./analyticsAuth');
+const ABIERTAS = [/^\/hooks\//, /^\/calls\/hook$/, /^\/health$/];
+app.use('/api', (req, res, next) => {
+  if (ABIERTAS.some(re => re.test(req.path))) return next();
+  requirePlatform('cotizaciones')(req, res, next);
+});
+
+app.use('/api', require('./pipeline'));       // pipeline/oportunidades + webhook n8n
+app.use('/api', require('./quotes'));         // cotizaciones (MSSQL) + PDF (Supabase)
+app.use('/api', require('./calls'));          // llamadas del agente de voz + webhook n8n
 
 app.get('/api/stats', optionalAuth, wrap(async (req, res) => {
   const { from, to } = rangeOf(req);
