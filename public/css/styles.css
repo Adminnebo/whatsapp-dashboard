@@ -645,3 +645,22 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .qr { margin-top: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; text-align: center; }
 .qr img { width: 240px; max-width: 100%; border-radius: 8px; background: #fff; }
 .qr p { font-size: 12.5px; color: var(--text-soft); margin-top: 12px; line-height: 1.5; }
+
+/* ============ TICKETS ============ */
+.tk__lbl { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-soft); margin-bottom: 12px; }
+.tk__inp { display: block; width: 100%; margin-top: 5px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--input-bg); color: var(--text); outline: none; font-size: 14px; }
+.tk__inp:focus { border-color: var(--brand); }
+.tk__area { resize: vertical; min-height: 90px; line-height: 1.45; }
+.tk__row { display: flex; gap: 10px; }
+.tk__row .tk__lbl { flex: 1; }
+.tk__err { color: var(--danger); font-size: 13px; margin: 0 0 10px; }
+.tk__enviar { width: 100%; padding: 12px; border-radius: 10px; background: var(--brand); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; }
+.tk__enviar:hover { background: var(--brand-dark); }
+.tk__enviar:disabled { opacity: .6; cursor: default; }
+.tk__cfg-link { display: block; margin: 14px auto 0; color: var(--text-mute); font-size: 12px; text-decoration: underline; }
+.tk__ok { text-align: center; padding: 20px 8px; }
+.tk__ok-ic { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 50%; background: #d8f5e3; color: #0f7a3d; font-size: 26px; font-weight: 800; display: grid; place-items: center; }
+[data-theme="dark"] .tk__ok-ic { background: rgba(26,161,121,.2); color: #34d399; }
+.tk__ok p { font-size: 14px; color: var(--text-soft); }
+.tk__otro { margin-top: 16px; padding: 9px 18px; border: 1px solid var(--border); border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--text-soft); }
+.tk__otro:hover { border-color: var(--brand); color: var(--brand); }

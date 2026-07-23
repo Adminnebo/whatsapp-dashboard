@@ -20,6 +20,7 @@
       this.loadHandoff();
       this.loadTemplates();
       if (global.Devices) global.Devices.init();
+      if (global.Tickets) global.Tickets.init();
       if (global.Notifs) global.Notifs.init();
     },
 

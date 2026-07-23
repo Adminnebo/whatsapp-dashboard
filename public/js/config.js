@@ -20,6 +20,9 @@ window.WA_CONFIG = {
   // Servicio de dispositivos por QR (se puede cambiar desde el panel Dispositivos).
   devicesUrl:   '',
 
+  // Endpoint externo al que se envían los tickets (n8n u otro). Configurable desde el panel.
+  ticketsUrl:   '',
+
   pollInterval: 10000,
 
   // Las plantillas ya no se definen aquí: se leen de Meta (/api/wa-templates)

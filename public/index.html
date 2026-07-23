@@ -6,7 +6,7 @@
   <title>Conversaciones · Nebo AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=32" />
+  <link rel="stylesheet" href="css/styles.css?v=33" />
 </head>
 <body>
   <!-- ============ APP SHELL ============ -->
@@ -23,6 +23,9 @@
       </button>
       <button class="rail__btn" id="btnDevices" title="Dispositivos adicionales">
         <svg viewBox="0 0 24 24"><path d="M17 1H7a2 2 0 0 0-2 2v18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm0 18H7V5h10v14z"/></svg>
+      </button>
+      <button class="rail__btn" id="btnTickets" title="Tickets / soporte">
+        <svg viewBox="0 0 24 24"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4a2 2 0 0 1 0 4v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4a2 2 0 0 1 0-4zm-9 7.5h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2v-2h2v2z"/></svg>
       </button>
       <div class="rail__spacer"></div>
       <button class="rail__btn" id="btnUsers" title="Usuarios" hidden onclick="location.href='/users.html'">
@@ -234,6 +237,26 @@
     </div>
   </div>
 
+  <!-- ============ MODAL: Tickets ============ -->
+  <div class="modal" id="ticketsModal" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__card modal__card--sm">
+      <header class="modal__head">
+        <h2>Nuevo ticket</h2>
+        <button class="btn-icon" data-close>✕</button>
+      </header>
+      <div class="modal__body">
+        <div id="ticketForm"></div>
+        <div id="ticketOk" hidden class="tk__ok">
+          <div class="tk__ok-ic">✓</div>
+          <p><b>Ticket enviado.</b> Nuestro equipo lo revisará.</p>
+          <button class="tk__otro" id="tkOtro">Crear otro</button>
+        </div>
+        <button class="tk__cfg-link" id="tkCfg" title="Cambiar el endpoint">Configurar endpoint</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ MODAL: Dispositivos adicionales ============ -->
   <div class="modal" id="devicesModal" hidden>
     <div class="modal__backdrop" data-close></div>
@@ -289,13 +312,14 @@
 
   <!-- Scripts clásicos (compatibles con file://, sin paso de build).
        ?v= = cache-busting: súbelo cuando cambies un .js para forzar recarga. -->
-  <script src="js/config.js?v=32"></script>
-  <script src="js/store.js?v=32"></script>
-  <script src="js/api.js?v=32"></script>
-  <script src="js/ui.js?v=32"></script>
-  <script src="js/auth.js?v=32"></script>
-  <script src="js/devices.js?v=32"></script>
-  <script src="js/notifications.js?v=32"></script>
-  <script src="js/app.js?v=32"></script>
+  <script src="js/config.js?v=33"></script>
+  <script src="js/store.js?v=33"></script>
+  <script src="js/api.js?v=33"></script>
+  <script src="js/ui.js?v=33"></script>
+  <script src="js/auth.js?v=33"></script>
+  <script src="js/devices.js?v=33"></script>
+  <script src="js/tickets.js?v=33"></script>
+  <script src="js/notifications.js?v=33"></script>
+  <script src="js/app.js?v=33"></script>
 </body>
 </html>
