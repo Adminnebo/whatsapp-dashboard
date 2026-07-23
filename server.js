@@ -914,9 +914,14 @@ app.post('/api/tickets', wrap(async (req, res) => {
       return res.status(502).json({ error: 'El gestor de tareas respondió ' + r.status });
     }
     let data = null; try { data = txt ? JSON.parse(txt) : null; } catch (_) {}
-    // el project-manager devuelve { task: { id, … } } (a veces anidado)
+    // el project-manager devuelve { task: { id, … } } (a veces anidado). Buscamos el
+    // id en profundidad; si no aparece, lo registramos para poder ajustarlo.
     const task = (data && data.task && data.task.task) || (data && data.task) || data || {};
-    const externalId = task && (task.id || task.taskId) ? String(task.id || task.taskId) : null;
+    const idBruto = task.id || task.taskId || task._id || task.uuid
+      || (data && (data.id || data.taskId))
+      || (data && data.data && data.data.id);
+    const externalId = idBruto ? String(idBruto) : null;
+    if (!externalId) console.warn('[tickets] el project-manager no devolvió id de tarea; respuesta:', txt.slice(0, 200));
 
     // Guardamos el ticket para poder listarlo y saber su estado.
     let saved = null;
@@ -957,29 +962,62 @@ app.get('/api/tickets', wrap(async (req, res) => {
   })) });
 }));
 
-// ── Webhook: el project-manager avisa al completar un ticket ─────────────────
+// ── Webhook: el project-manager avisa cuando cambia el estado de un ticket ───
 // Lo protege un secreto compartido (TICKETS_WEBHOOK_SECRET), NO la sesión de usuario.
-// Marca el ticket como completado y notifica a quien lo creó.
+// Diseñado para integrarse con CUALQUIER emisor de webhooks: acepta el secreto por
+// varios sitios y busca el id de la tarea y el estado en muchos nombres de campo,
+// incluso anidados. Es idempotente: completar dos veces no duplica la notificación.
 const TICKETS_WEBHOOK_SECRET = process.env.TICKETS_WEBHOOK_SECRET || '';
-app.post('/api/tickets/webhook', wrap(async (req, res) => {
-  const secret = req.get('x-webhook-secret') || (req.body && req.body.secret) || '';
-  if (!TICKETS_WEBHOOK_SECRET || secret !== TICKETS_WEBHOOK_SECRET) {
-    return res.status(401).json({ error: 'secreto inválido' });
+
+// Busca la primera clave presente dentro de un objeto (superficial + un nivel).
+function buscarCampo(obj, claves) {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const k of claves) if (obj[k] != null && obj[k] !== '') return obj[k];
+  for (const sub of ['task', 'data', 'record', 'ticket', 'payload', 'body']) {
+    const o = obj[sub];
+    if (o && typeof o === 'object') for (const k of claves) if (o[k] != null && o[k] !== '') return o[k];
   }
+  return null;
+}
+// ¿este texto/estado significa "completado"?
+const esCompletado = v => {
+  if (v === true) return true;
+  const s = String(v || '').toLowerCase();
+  return /complet|done|finaliz|cerr|resuelt|closed|resolved/.test(s);
+};
+
+// Ayuda si alguien abre la URL en el navegador (GET): confirma que está viva.
+app.get('/api/tickets/webhook', (_req, res) => res.json({
+  ok: true, hint: 'Usa POST con el header x-webhook-secret y { taskId, status }.'
+}));
+
+app.post('/api/tickets/webhook', wrap(async (req, res) => {
   const b = req.body || {};
-  const externalId = String(b.taskId || b.external_id || b.id || '').trim();
-  const estado = String(b.status || b.stage || 'completado').toLowerCase();
-  const completado = /complet|done|finaliz|cerr|resuelt/.test(estado);
-  if (!externalId) return res.status(400).json({ error: 'falta taskId' });
+  // Secreto: header, Bearer, query ?secret= o campo en el body — lo que soporte el emisor.
+  const bearer = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  const secret = req.get('x-webhook-secret') || bearer || req.query.secret || b.secret || '';
+  if (!TICKETS_WEBHOOK_SECRET) return res.status(503).json({ error: 'Webhook sin configurar (falta TICKETS_WEBHOOK_SECRET)' });
+  if (secret !== TICKETS_WEBHOOK_SECRET) return res.status(401).json({ error: 'Secreto inválido' });
+
+  // Id de la tarea del project-manager (lo guardamos como external_id al crear el ticket).
+  const externalId = String(buscarCampo(b, ['taskId', 'external_id', 'externalId', 'id', 'task_id']) || '').trim();
+  // También permitimos apuntar por NUESTRO id de ticket, por si lo tienen.
+  const ticketId = String(buscarCampo(b, ['ticketId', 'nebo_ticket_id']) || '').trim();
+  if (!externalId && !ticketId) return res.status(400).json({ error: 'Falta el id de la tarea (taskId)' });
+
+  const estadoRaw = buscarCampo(b, ['status', 'stage', 'state', 'estado']) ?? (b.completed === true ? 'completado' : 'completado');
+  const completado = esCompletado(estadoRaw) || b.completed === true;
+  const nuevoEstado = completado ? 'completado' : (String(estadoRaw || 'en_progreso').toLowerCase().slice(0, 40));
 
   const r = await q(
-    `UPDATE tickets SET status = $2, completed_at = CASE WHEN $3 THEN now() ELSE completed_at END, updated_at = now()
-     WHERE external_id = $1 RETURNING id, title, user_id`,
-    [externalId, completado ? 'completado' : (estado || 'en_progreso'), completado]);
+    `UPDATE tickets SET status = $2, completed_at = CASE WHEN $3 AND completed_at IS NULL THEN now() ELSE completed_at END, updated_at = now()
+     WHERE ($1 <> '' AND external_id = $1) OR ($4 <> '' AND id::text = $4)
+     RETURNING id, title, user_id, status`,
+    [externalId, nuevoEstado, completado, ticketId]);
   const t = r.rows[0];
-  if (!t) return res.status(404).json({ error: 'ticket no encontrado' });
+  if (!t) return res.status(404).json({ error: 'No encontramos un ticket con ese id', taskId: externalId || ticketId });
 
-  // Notifica al usuario que lo creó (notificación dirigida).
+  // Notifica al autor (idempotente: el índice único evita repetir el aviso).
   if (completado && t.user_id) {
     await notify({
       type: 'ticket', userId: t.user_id,
@@ -988,7 +1026,7 @@ app.post('/api/tickets/webhook', wrap(async (req, res) => {
       refId: 'ticket-done-' + t.id
     });
   }
-  res.json({ ok: true, id: String(t.id), completado });
+  res.json({ ok: true, id: String(t.id), status: t.status, completado });
 }));
 
 // Envía una plantilla aprobada. Es lo ÚNICO que Meta deja mandar fuera de la
