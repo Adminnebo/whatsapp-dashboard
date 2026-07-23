@@ -9,11 +9,9 @@
   const $ = s => document.querySelector(s);
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  // URL del endpoint de tickets (se puede sobreescribir desde el propio panel).
-  function endpoint() {
-    try { const g = localStorage.getItem('nebo_tickets_url'); if (g) return g; } catch (_) {}
-    return (global.WA_CONFIG && WA_CONFIG.ticketsUrl) || '';
-  }
+  // El ticket va al backend propio (/api/tickets), que lo reenvía al gestor de
+  // tareas con la API key. La key NUNCA está en el navegador.
+  const ENDPOINT = '/api/tickets';
 
   const PRIORIDADES = [
     { v: 'baja', t: 'Baja' },
@@ -76,7 +74,6 @@
       const err = $('#tkErr');
       err.hidden = true;
       if (!asunto || !desc) { err.textContent = 'El asunto y la descripción son obligatorios.'; err.hidden = false; return; }
-      if (!endpoint()) { err.textContent = 'Falta configurar el endpoint de tickets.'; err.hidden = false; return; }
 
       const btn = $('#tkEnviar');
       btn.disabled = true; btn.textContent = 'Enviando…';
@@ -89,17 +86,15 @@
         categoria: $('#tkCategoria').value,
         origen: 'web',
         app: 'inbox',
-        usuario,
-        creadoEn: new Date().toISOString(),
-        userAgent: navigator.userAgent
+        usuario
       };
 
       try {
         const h = { 'Content-Type': 'application/json' };
         if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
-        const r = await fetch(endpoint(), { method: 'POST', headers: h, body: JSON.stringify(payload) });
-        if (!r.ok) throw new Error('El endpoint respondió ' + r.status);
-        // éxito
+        const r = await fetch(ENDPOINT, { method: 'POST', headers: h, body: JSON.stringify(payload) });
+        const data = await r.json().catch(() => null);
+        if (!r.ok) throw new Error((data && data.error) || 'Error ' + r.status);
         $('#ticketForm').hidden = true;
         $('#ticketOk').hidden = false;
       } catch (e) {
@@ -117,10 +112,6 @@
       if (!modal) return;
       modal.addEventListener('click', e => {
         if (e.target.hasAttribute('data-close')) return this.cerrar();
-        if (e.target.id === 'tkCfg') {
-          const u = prompt('URL del endpoint de tickets', endpoint());
-          if (u) { try { localStorage.setItem('nebo_tickets_url', u.trim()); } catch (_) {} this.pintarForm(); }
-        }
         if (e.target.id === 'tkOtro') { $('#ticketOk').hidden = true; $('#ticketForm').hidden = false; this.pintarForm(); }
       });
     }

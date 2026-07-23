@@ -23,6 +23,9 @@ const WA_PHONE = process.env.WHATSAPP_PHONE_ID || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const HANDOFF_TAG = process.env.HANDOFF_TAG || 'handoff';
 const CLIENT_CHARGE_OUT = Number(process.env.CLIENT_CHARGE_OUT || 0.03); // lo que se cobra por saliente
+// Tickets → project-manager. La API key NO va al cliente: se queda aquí.
+const TICKETS_URL = process.env.TICKETS_URL || 'https://project-manager-production-1787.up.railway.app/api/ingest/tasks';
+const TICKETS_API_KEY = process.env.TICKETS_API_KEY || '';
 
 // ── CORS para la app móvil ───────────────────────────────────────────────────
 // La app de Capacitor no se sirve desde este dominio: en Android llega como
@@ -844,6 +847,53 @@ app.get('/api/wa-templates', wrap(async (req, res) => {
   const todas = asBool(req.query.all);
   const templates = _tplCache.items.filter(t => todas || t.status === 'APPROVED');
   res.json({ ok: true, waba, templates, cachedAt: _tplCache.at });
+}));
+
+// ── Tickets → project-manager ────────────────────────────────────────────────
+// El cliente (web/app) manda aquí; nosotros reenviamos con la API key (que nunca
+// sale al navegador). Mapea nuestros campos al formato del project-manager.
+const PRIORIDAD_PM = { baja: 'LOW', media: 'MEDIUM', alta: 'HIGH', urgente: 'URGENT' };
+app.post('/api/tickets', wrap(async (req, res) => {
+  const b = req.body || {};
+  const asunto = String(b.asunto || '').trim();
+  const desc = String(b.descripcion || '').trim();
+  if (!asunto || !desc) return res.status(400).json({ error: 'Asunto y descripción son obligatorios' });
+  if (!TICKETS_API_KEY) return res.status(500).json({ error: 'Falta TICKETS_API_KEY en el servidor' });
+
+  // Quién lo reporta (de la sesión) para dar contexto en la tarea.
+  const u = b.usuario || {};
+  const quien = u.name || u.email || (req.user && req.user.email) || 'desconocido';
+  const meta = [
+    'Reportado por: ' + quien,
+    b.categoria ? 'Categoría: ' + b.categoria : '',
+    'Origen: ' + (b.origen || '?') + (b.app ? ' (' + b.app + ')' : '')
+  ].filter(Boolean).join('\n');
+
+  const payload = {
+    title: asunto,
+    description: desc + '\n\n— — —\n' + meta,
+    priority: PRIORIDAD_PM[String(b.prioridad || '').toLowerCase()] || 'MEDIUM',
+    stage: 'Nuevo'
+  };
+
+  try {
+    const r = await fetch(TICKETS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': TICKETS_API_KEY },
+      body: JSON.stringify(payload)
+    });
+    const txt = await r.text();
+    if (!r.ok) {
+      console.error('[tickets]', r.status, txt.slice(0, 200));
+      return res.status(502).json({ error: 'El gestor de tareas respondió ' + r.status });
+    }
+    let data = null; try { data = txt ? JSON.parse(txt) : null; } catch (_) {}
+    await logAction(req, 'ticket', null, 'Creó un ticket: ' + asunto).catch(() => {});
+    res.json({ ok: true, task: data });
+  } catch (e) {
+    console.error('[tickets]', e.message);
+    res.status(502).json({ error: 'No se pudo contactar con el gestor de tareas' });
+  }
 }));
 
 // Envía una plantilla aprobada. Es lo ÚNICO que Meta deja mandar fuera de la
