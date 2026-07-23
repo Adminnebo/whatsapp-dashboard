@@ -664,3 +664,22 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tk__ok p { font-size: 14px; color: var(--text-soft); }
 .tk__otro { margin-top: 16px; padding: 9px 18px; border: 1px solid var(--border); border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--text-soft); }
 .tk__otro:hover { border-color: var(--brand); color: var(--brand); }
+
+/* ============ SIN ACCESO A LA PLATAFORMA ============ */
+.noacc { max-width: 420px; margin: 12vh auto; padding: 40px 28px; text-align: center; font-family: 'Inter', system-ui, sans-serif; color: var(--text); }
+.noacc__ic { font-size: 46px; margin-bottom: 14px; }
+.noacc h1 { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
+.noacc p { color: var(--text-soft); font-size: 14.5px; line-height: 1.5; }
+.noacc__links { display: flex; flex-direction: column; gap: 10px; margin: 22px 0; }
+.noacc__link { padding: 12px; border: 1px solid var(--border); border-radius: 10px; text-decoration: none; color: var(--brand); font-weight: 600; }
+.noacc__link:hover { background: var(--hover); }
+.noacc__out { margin-top: 8px; padding: 10px 20px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-soft); font-weight: 600; cursor: pointer; }
+
+/* casillas de plataforma en el panel de usuarios */
+.plats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 5px; }
+.plat { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border: 1px solid var(--border); border-radius: 9px; font-size: 13px; cursor: pointer; user-select: none; }
+.plat input { margin: 0; }
+.plat--on { border-color: var(--brand); background: rgba(47,109,246,.08); color: var(--brand); font-weight: 600; }
+.plat--lock { opacity: .6; cursor: default; }
+.plats__nota { font-size: 12px; color: var(--text-mute); margin-top: 6px; }
+.pill--plat { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px; background: var(--bg); color: var(--text-soft); margin-right: 3px; }

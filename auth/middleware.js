@@ -11,6 +11,35 @@ const { anon, getProfile } = require('./supabase');
 const cache = new Map();            // token -> { user, exp }
 const TTL = 60 * 1000;              // 60s
 
+// ── Acceso por plataforma ────────────────────────────────────────────────────
+// Las tres plataformas comparten login. super_admin y admin ven TODAS siempre;
+// a un 'agent' se le limita con profiles.platforms (array). Si la columna aún no
+// existe (antes de correr la migración en Supabase) o es null, ve todas: así el
+// despliegue no deja a nadie fuera.
+const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas'];
+
+function plataformasDe(profile) {
+  const role = profile && profile.role;
+  if (role === 'super_admin' || role === 'admin') return PLATAFORMAS.slice();
+  const p = profile && profile.platforms;
+  return Array.isArray(p) ? p : PLATAFORMAS.slice();
+}
+
+// Middleware que exige acceso a una plataforma concreta.
+function requirePlatform(key) {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+      const prof = req.profile || await getProfile(req.user.id);
+      req.profile = prof;
+      if (!plataformasDe(prof).includes(key)) {
+        return res.status(403).json({ error: 'Sin acceso a esta plataforma', platform: key });
+      }
+      next();
+    } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
+  };
+}
+
 async function verify(token) {
   const hit = cache.get(token);
   if (hit && hit.exp > Date.now()) return hit.user;
@@ -73,4 +102,4 @@ async function requireSuperAdmin(req, res, next) {
   } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
 }
 
-module.exports = { requireAuth, requireAdmin, requireSuperAdmin, optionalAuth, verify };
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, optionalAuth, verify, requirePlatform, plataformasDe, PLATAFORMAS };

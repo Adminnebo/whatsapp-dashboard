@@ -57,6 +57,11 @@
         <div><label>Nombre</label><input type="text" id="nName" placeholder="opcional" /></div>
         <div><label>Rol</label><select id="nRole"><option value="agent">Agente</option><option value="admin">Admin</option></select></div>
         <div><label>Usuario GHL</label><select id="nGhl"><option value="">— ninguno —</option></select></div>
+        <div style="grid-column:1/-1">
+          <label>Acceso a plataformas</label>
+          <div class="plats" id="nPlats"></div>
+          <div class="plats__nota" id="nPlatsNota"></div>
+        </div>
         <div><button class="btn btn--primary" id="createBtn">Crear</button></div>
       </div>
       <div class="msg" id="createMsg"></div>
@@ -79,6 +84,9 @@
       <label>Nombre</label><input type="text" id="eName" />
       <label>Rol</label><select id="eRole"><option value="agent">Agente</option><option value="admin">Admin</option></select>
       <label>Usuario GHL</label><select id="eGhl"></select>
+      <label>Acceso a plataformas</label>
+      <div class="plats" id="ePlats"></div>
+      <div class="plats__nota" id="ePlatsNota"></div>
       <label>Nueva contraseña <span class="dim">(vacío = no cambiar)</span></label><input type="text" id="ePass" placeholder="••••••" />
       <div class="modal__actions"><button class="btn" id="eCancel">Cancelar</button><button class="btn btn--primary" id="eSave">Guardar</button></div>
       <div class="msg" id="editMsg"></div>
@@ -112,6 +120,27 @@
       $('#nGhl').innerHTML = ghlOptions('');
     }
 
+    // ---- casillas de acceso por plataforma ----
+    const PLATS = [['inbox', 'Conversaciones'], ['cotizaciones', 'Cotizaciones'], ['cobranzas', 'Cobranzas']];
+    // admin/super_admin siempre tienen todas (bloqueadas); a un agente se le eligen.
+    function renderPlats(boxId, notaId, seleccion, role) {
+      const admin = role === 'admin' || role === 'super_admin';
+      const marcadas = admin ? PLATS.map(p => p[0]) : (seleccion || PLATS.map(p => p[0]));
+      $('#' + boxId).innerHTML = PLATS.map(([k, t]) => {
+        const on = marcadas.includes(k);
+        return `<label class="plat ${on ? 'plat--on' : ''} ${admin ? 'plat--lock' : ''}">
+          <input type="checkbox" value="${k}" ${on ? 'checked' : ''} ${admin ? 'disabled' : ''}> ${t}</label>`;
+      }).join('');
+      $('#' + notaId).textContent = admin ? 'Los administradores tienen acceso a todas las plataformas.' : 'Marca a qué plataformas puede entrar este agente.';
+      // toggle visual al marcar
+      $('#' + boxId).querySelectorAll('.plat input').forEach(i => i.addEventListener('change', e => {
+        e.target.closest('.plat').classList.toggle('plat--on', e.target.checked);
+      }));
+    }
+    function readPlats(boxId) {
+      return [...$('#' + boxId).querySelectorAll('.plat input:checked')].map(i => i.value);
+    }
+
     async function loadUsers() {
       const r = await Auth.fetch('/api/auth/users');
       if (!r.ok) { $('#listMsg').className = 'msg msg--err'; $('#listMsg').textContent = 'Error al cargar usuarios'; return; }
@@ -132,10 +161,15 @@
       </tr>`).join('') || '<tr><td colspan="6" class="dim">Sin usuarios.</td></tr>';
     }
 
+    // render inicial de las casillas de "crear" + re-render al cambiar el rol
+    renderPlats('nPlats', 'nPlatsNota', null, $('#nRole').value);
+    $('#nRole').addEventListener('change', () => renderPlats('nPlats', 'nPlatsNota', readPlats('nPlats'), $('#nRole').value));
+
     document.getElementById('createBtn').addEventListener('click', async () => {
       const body = {
         email: $('#nEmail').value.trim(), password: $('#nPass').value,
-        fullName: $('#nName').value.trim() || null, role: $('#nRole').value, ghlUserId: $('#nGhl').value || null
+        fullName: $('#nName').value.trim() || null, role: $('#nRole').value, ghlUserId: $('#nGhl').value || null,
+        platforms: readPlats('nPlats')
       };
       const m = $('#createMsg');
       const r = await Auth.fetch('/api/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -165,6 +199,7 @@
       const roleSel = $('#eRole');
       if (u.role === 'super_admin') { roleSel.innerHTML = '<option value="super_admin">Super admin (solo por API)</option>'; roleSel.value = 'super_admin'; roleSel.disabled = true; }
       else { roleSel.innerHTML = '<option value="agent">Agente</option><option value="admin">Admin</option>'; roleSel.value = u.role; roleSel.disabled = false; }
+      renderPlats('ePlats', 'ePlatsNota', u.platforms, u.role);
       $('#ePass').value = '';
       $('#editMsg').textContent = '';
       $('#editModal').hidden = false;
@@ -172,11 +207,14 @@
     function closeEdit() { $('#editModal').hidden = true; editingId = null; }
     $('#eCancel').addEventListener('click', closeEdit);
     $('#editModal').addEventListener('click', e => { if (e.target.id === 'editModal') closeEdit(); });
+    // al cambiar el rol en la edición, recalcula las casillas (admin = todas, bloqueadas)
+    $('#eRole').addEventListener('change', () => renderPlats('ePlats', 'ePlatsNota', readPlats('ePlats'), $('#eRole').value));
 
     $('#eSave').addEventListener('click', async () => {
       if (!editingId) return;
       const patch = { email: $('#eEmail').value.trim(), fullName: $('#eName').value.trim() || null, ghlUserId: $('#eGhl').value || null };
       if (!$('#eRole').disabled) patch.role = $('#eRole').value;   // super_admin no se cambia por el panel
+      patch.platforms = readPlats('ePlats');                       // acceso por plataforma (agentes)
       const pass = $('#ePass').value; if (pass) patch.password = pass;
       const r = await Auth.fetch('/api/auth/users/' + editingId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
       if (r.ok) { closeEdit(); loadUsers(); }

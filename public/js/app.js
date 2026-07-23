@@ -657,10 +657,32 @@
         try {
           const me = await Auth.me();
           const role = me && me.profile ? me.profile.role : null;
+          // Puerta de acceso: si el usuario no tiene la plataforma 'inbox', no entra.
+          const plats = (me && me.platforms) || [];
+          if (Array.isArray(plats) && plats.length && !plats.includes('inbox')) {
+            return mostrarSinAcceso(plats);
+          }
           if (['admin', 'super_admin'].includes(role)) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
         } catch (_) {}
       }
     }
     App.init();
   });
+
+  // Pantalla de "sin acceso" con enlaces a las plataformas que SÍ tiene.
+  function mostrarSinAcceso(plats) {
+    const destinos = {
+      cotizaciones: ['Panel de cotizaciones', 'https://panelcotizaciones.neboaiconsulting.com'],
+      cobranzas: ['Panel de cobranzas', 'https://panelcobranzas.neboaiconsulting.com']
+    };
+    const links = (plats || []).filter(p => destinos[p])
+      .map(p => `<a class="noacc__link" href="${destinos[p][1]}">${destinos[p][0]} →</a>`).join('');
+    document.body.innerHTML = `<div class="noacc">
+      <div class="noacc__ic">🔒</div>
+      <h1>Sin acceso a Conversaciones</h1>
+      <p>Tu usuario no tiene permiso para esta plataforma. Pídeselo a un administrador.</p>
+      ${links ? '<div class="noacc__links">' + links + '</div>' : ''}
+      <button class="noacc__out" onclick="window.Auth && Auth.signOut()">Cerrar sesión</button>
+    </div>`;
+  }
 })(window);

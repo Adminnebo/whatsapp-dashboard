@@ -59,7 +59,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 
 
 // ── Autenticación (Supabase) — módulo reutilizable en auth/ ──────────────────
 const authRouter = require('./auth/router');
-const { requireAuth, requireAdmin } = require('./auth/middleware');
+const { requireAuth, requireAdmin, requirePlatform } = require('./auth/middleware');
 const { configured: authConfigured, getProfile } = require('./auth/supabase');
 // Nombre del agente logueado (para sent_by). Null si no hay sesión.
 async function agentName(req) {
@@ -93,11 +93,17 @@ app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 // (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
 const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media']);
+// /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
+// no tenga acceso a la plataforma del inbox.
+const SIN_PLATAFORMA = new Set(['/tickets']);
 app.use('/api', (req, res, next) => {
   if (!authConfigured) return next();                    // sin Supabase configurado: modo abierto (no rompe)
   if (req.path.startsWith('/auth/')) return next();      // el router de auth se protege solo
   if (OPEN_API.has(req.path)) return next();             // integraciones máquina-a-máquina
-  return requireAuth(req, res, next);                    // todo lo demás exige sesión
+  requireAuth(req, res, () => {                          // exige sesión…
+    if (SIN_PLATAFORMA.has(req.path)) return next();
+    requirePlatform('inbox')(req, res, next);            // …y acceso a la plataforma inbox
+  });
 });
 
 // --- helpers ---

@@ -40,3 +40,15 @@ create trigger on_auth_user_created
 --    (o luego desde el panel /users.html, pero el primero hazlo aquí).
 -- 2) Márcalo como admin:
 --    update public.profiles set role = 'admin' where email = 'TU_ADMIN@empresa.com';
+
+-- =========================================================
+-- Control de acceso por plataforma (correr una vez en Supabase → SQL Editor).
+-- Las 3 plataformas comparten login: inbox (conversaciones), cotizaciones, cobranzas.
+-- super_admin y admin ven todas siempre; a los 'agent' se les limita con esta lista.
+-- =========================================================
+alter table public.profiles
+  add column if not exists platforms text[] not null default array['inbox','cotizaciones','cobranzas'];
+
+-- Los usuarios que ya existen arrancan con las 3 (nadie pierde acceso).
+update public.profiles set platforms = array['inbox','cotizaciones','cobranzas']
+  where platforms is null;
