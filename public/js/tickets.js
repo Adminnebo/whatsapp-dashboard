@@ -35,11 +35,51 @@
 
     abrir() {
       $('#ticketsModal').hidden = false;
+      this.verNuevo();
+    },
+    cerrar() { $('#ticketsModal').hidden = true; },
+
+    verNuevo() {
+      document.querySelectorAll('.tk__tab').forEach(t => t.classList.toggle('tk__tab--on', t.dataset.tkview === 'nuevo'));
+      $('#ticketList').hidden = true;
       $('#ticketOk').hidden = true;
       $('#ticketForm').hidden = false;
       this.pintarForm();
     },
-    cerrar() { $('#ticketsModal').hidden = true; },
+
+    async verLista() {
+      document.querySelectorAll('.tk__tab').forEach(t => t.classList.toggle('tk__tab--on', t.dataset.tkview === 'lista'));
+      $('#ticketForm').hidden = true;
+      $('#ticketOk').hidden = true;
+      const box = $('#ticketList');
+      box.hidden = false;
+      box.innerHTML = '<p class="tk__cargando">Cargando…</p>';
+      try {
+        const h = {}; if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
+        const d = await (await fetch('/api/tickets', { headers: h })).json();
+        this.pintarLista(d.tickets || [], d.admin);
+      } catch (e) {
+        box.innerHTML = `<p class="tk__err">No se pudieron cargar: ${esc(e.message)}</p>`;
+      }
+    },
+
+    pintarLista(tickets, admin) {
+      const box = $('#ticketList');
+      if (!tickets.length) { box.innerHTML = '<p class="tk__vacio">No hay tickets todavía.</p>'; return; }
+      const EST = { nuevo: ['Nuevo', 'nuevo'], en_progreso: ['En progreso', 'prog'], completado: ['✓ Completado', 'ok'] };
+      const PRI = { baja: 'Baja', media: 'Media', alta: 'Alta', urgente: 'Urgente' };
+      const fecha = ms => ms ? new Date(ms).toLocaleDateString('es-DO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+      box.innerHTML = tickets.map(t => {
+        const [et, cls] = EST[t.status] || ['—', 'nuevo'];
+        return `<div class="tkitem tkitem--${cls}">
+          <div class="tkitem__top">
+            <span class="tkitem__title">${esc(t.title)}</span>
+            <span class="tkitem__est tkitem__est--${cls}">${et}</span>
+          </div>
+          <div class="tkitem__meta">${esc(PRI[t.priority] || t.priority || '')}${t.category ? ' · ' + esc(t.category) : ''} · ${fecha(t.createdAt)}${admin && t.userEmail ? ' · ' + esc(t.userEmail) : ''}</div>
+        </div>`;
+      }).join('');
+    },
 
     pintarForm() {
       const box = $('#ticketForm');
@@ -112,7 +152,9 @@
       if (!modal) return;
       modal.addEventListener('click', e => {
         if (e.target.hasAttribute('data-close')) return this.cerrar();
-        if (e.target.id === 'tkOtro') { $('#ticketOk').hidden = true; $('#ticketForm').hidden = false; this.pintarForm(); }
+        if (e.target.dataset.tkview === 'nuevo') return this.verNuevo();
+        if (e.target.dataset.tkview === 'lista') return this.verLista();
+        if (e.target.id === 'tkOtro') return this.verNuevo();
       });
     }
   };

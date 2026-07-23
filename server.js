@@ -69,12 +69,12 @@ async function agentName(req) {
 }
 // Crea una notificación para la app. El índice único (type, ref_id) evita duplicados
 // si el escáner corre varias veces sobre el mismo hecho. Devuelve el id o null si ya existía.
-async function notify({ type, contactId, conversationId, title, body, refId }) {
+async function notify({ type, contactId, conversationId, title, body, refId, userId }) {
   try {
     const r = await q(
-      `INSERT INTO notifications (type, contact_id, conversation_id, title, body, ref_id)
-       VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (type, ref_id) DO NOTHING RETURNING id`,
-      [type, contactId || null, conversationId || null, title, body || null, refId || null]);
+      `INSERT INTO notifications (type, contact_id, conversation_id, title, body, ref_id, user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (type, ref_id) DO NOTHING RETURNING id`,
+      [type, contactId || null, conversationId || null, title, body || null, refId || null, userId || null]);
     return r.rows[0] ? r.rows[0].id : null;
   } catch (e) { console.error('notify', e.message); return null; }
 }
@@ -92,7 +92,7 @@ async function logAction(req, action, contactId, detail) {
 app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 // (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
-const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media']);
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
@@ -292,6 +292,25 @@ CREATE TABLE IF NOT EXISTS notifications (id BIGSERIAL PRIMARY KEY, type TEXT NO
 CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_ref ON notifications(type, ref_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
 CREATE TABLE IF NOT EXISTS notification_reads (notification_id BIGINT REFERENCES notifications(id) ON DELETE CASCADE, user_key TEXT, read_at TIMESTAMPTZ DEFAULT now(), PRIMARY KEY (notification_id, user_key));
+-- Notificaciones dirigidas a un usuario concreto (null = global, la ven todos).
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id TEXT;
+-- Tickets de soporte enviados al project-manager (para verlos y saber su estado).
+CREATE TABLE IF NOT EXISTS tickets (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  priority TEXT,
+  category TEXT,
+  status TEXT NOT NULL DEFAULT 'nuevo',      -- nuevo | en_progreso | completado
+  origin TEXT, app TEXT,
+  user_id TEXT, user_email TEXT, user_name TEXT,
+  external_id TEXT,                           -- id de la tarea en el project-manager
+  created_at TIMESTAMPTZ DEFAULT now(),
+  completed_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tickets_ext ON tickets(external_id);
 `;
 async function migrate() { await q(MIGRATIONS); }
 
@@ -780,7 +799,8 @@ app.get('/api/notifications', wrap(async (req, res) => {
      FROM notifications n
      LEFT JOIN notification_reads nr ON nr.notification_id = n.id AND nr.user_key = $1
      WHERE n.created_at > now() - interval '7 days'
-     ORDER BY n.created_at DESC LIMIT $2`, [userKey(req), limit]);
+       AND (n.user_id IS NULL OR n.user_id = $3)     -- globales + las dirigidas a mí
+     ORDER BY n.created_at DESC LIMIT $2`, [userKey(req), limit, (req.user && req.user.id) || '']);
   const items = r.rows.map(n => ({
     id: String(n.id), type: n.type, contactId: n.contact_id || null,
     conversationId: n.conversation_id != null ? String(n.conversation_id) : null,
@@ -894,12 +914,81 @@ app.post('/api/tickets', wrap(async (req, res) => {
       return res.status(502).json({ error: 'El gestor de tareas respondió ' + r.status });
     }
     let data = null; try { data = txt ? JSON.parse(txt) : null; } catch (_) {}
+    // el project-manager devuelve { task: { id, … } } (a veces anidado)
+    const task = (data && data.task && data.task.task) || (data && data.task) || data || {};
+    const externalId = task && (task.id || task.taskId) ? String(task.id || task.taskId) : null;
+
+    // Guardamos el ticket para poder listarlo y saber su estado.
+    let saved = null;
+    try {
+      const r2 = await q(
+        `INSERT INTO tickets (title, description, priority, category, status, origin, app, user_id, user_email, user_name, external_id)
+         VALUES ($1,$2,$3,$4,'nuevo',$5,$6,$7,$8,$9,$10) RETURNING id`,
+        [asunto, desc, String(b.prioridad || 'media'), b.categoria || null, b.origen || null, b.app || null,
+         (req.user && req.user.id) || null, u.email || (req.user && req.user.email) || null, u.name || null, externalId]);
+      saved = r2.rows[0] ? String(r2.rows[0].id) : null;
+    } catch (e) { console.error('[tickets] guardar', e.message); }
+
     await logAction(req, 'ticket', null, 'Creó un ticket: ' + asunto).catch(() => {});
-    res.json({ ok: true, task: data });
+    res.json({ ok: true, id: saved, externalId, task });
   } catch (e) {
     console.error('[tickets]', e.message);
     res.status(502).json({ error: 'No se pudo contactar con el gestor de tareas' });
   }
+}));
+
+// Lista de tickets. Un agente ve los suyos; admin/super_admin ven todos.
+app.get('/api/tickets', wrap(async (req, res) => {
+  const prof = req.user ? await getProfile(req.user.id).catch(() => null) : null;
+  // Sin sesión (auth desactivada) o admin/super_admin → ve todos; agente → solo los suyos.
+  const esAdmin = !req.user || (prof && ['admin', 'super_admin'].includes(prof.role));
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+  const params = [limit];
+  let filtro = '';
+  if (!esAdmin) { params.push((req.user && req.user.id) || ''); filtro = 'WHERE user_id = $2'; }
+  const r = await q(
+    `SELECT id, title, description, priority, category, status, origin, user_email, user_name, external_id,
+            EXTRACT(EPOCH FROM created_at)*1000 AS created_at, EXTRACT(EPOCH FROM completed_at)*1000 AS completed_at
+     FROM tickets ${filtro} ORDER BY created_at DESC LIMIT $1`, params);
+  res.json({ ok: true, admin: !!esAdmin, tickets: r.rows.map(t => ({
+    id: String(t.id), title: t.title, description: t.description, priority: t.priority, category: t.category,
+    status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name,
+    createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null
+  })) });
+}));
+
+// ── Webhook: el project-manager avisa al completar un ticket ─────────────────
+// Lo protege un secreto compartido (TICKETS_WEBHOOK_SECRET), NO la sesión de usuario.
+// Marca el ticket como completado y notifica a quien lo creó.
+const TICKETS_WEBHOOK_SECRET = process.env.TICKETS_WEBHOOK_SECRET || '';
+app.post('/api/tickets/webhook', wrap(async (req, res) => {
+  const secret = req.get('x-webhook-secret') || (req.body && req.body.secret) || '';
+  if (!TICKETS_WEBHOOK_SECRET || secret !== TICKETS_WEBHOOK_SECRET) {
+    return res.status(401).json({ error: 'secreto inválido' });
+  }
+  const b = req.body || {};
+  const externalId = String(b.taskId || b.external_id || b.id || '').trim();
+  const estado = String(b.status || b.stage || 'completado').toLowerCase();
+  const completado = /complet|done|finaliz|cerr|resuelt/.test(estado);
+  if (!externalId) return res.status(400).json({ error: 'falta taskId' });
+
+  const r = await q(
+    `UPDATE tickets SET status = $2, completed_at = CASE WHEN $3 THEN now() ELSE completed_at END, updated_at = now()
+     WHERE external_id = $1 RETURNING id, title, user_id`,
+    [externalId, completado ? 'completado' : (estado || 'en_progreso'), completado]);
+  const t = r.rows[0];
+  if (!t) return res.status(404).json({ error: 'ticket no encontrado' });
+
+  // Notifica al usuario que lo creó (notificación dirigida).
+  if (completado && t.user_id) {
+    await notify({
+      type: 'ticket', userId: t.user_id,
+      title: '✅ Tu ticket fue resuelto',
+      body: t.title,
+      refId: 'ticket-done-' + t.id
+    });
+  }
+  res.json({ ok: true, id: String(t.id), completado });
 }));
 
 // Envía una plantilla aprobada. Es lo ÚNICO que Meta deja mandar fuera de la

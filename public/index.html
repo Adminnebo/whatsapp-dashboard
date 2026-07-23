@@ -6,7 +6,7 @@
   <title>Conversaciones · Nebo AI</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css?v=33" />
+  <link rel="stylesheet" href="css/styles.css?v=34" />
 </head>
 <body>
   <!-- ============ APP SHELL ============ -->
@@ -242,9 +242,13 @@
     <div class="modal__backdrop" data-close></div>
     <div class="modal__card modal__card--sm">
       <header class="modal__head">
-        <h2>Nuevo ticket</h2>
+        <h2>Tickets</h2>
         <button class="btn-icon" data-close>✕</button>
       </header>
+      <div class="tk__tabs">
+        <button class="tk__tab tk__tab--on" data-tkview="nuevo">Nuevo</button>
+        <button class="tk__tab" data-tkview="lista">Mis tickets</button>
+      </div>
       <div class="modal__body">
         <div id="ticketForm"></div>
         <div id="ticketOk" hidden class="tk__ok">
@@ -252,6 +256,7 @@
           <p><b>Ticket enviado.</b> Nuestro equipo lo revisará.</p>
           <button class="tk__otro" id="tkOtro">Crear otro</button>
         </div>
+        <div id="ticketList" hidden></div>
       </div>
     </div>
   </div>
@@ -311,14 +316,14 @@
 
   <!-- Scripts clásicos (compatibles con file://, sin paso de build).
        ?v= = cache-busting: súbelo cuando cambies un .js para forzar recarga. -->
-  <script src="js/config.js?v=33"></script>
-  <script src="js/store.js?v=33"></script>
-  <script src="js/api.js?v=33"></script>
-  <script src="js/ui.js?v=33"></script>
-  <script src="js/auth.js?v=33"></script>
-  <script src="js/devices.js?v=33"></script>
-  <script src="js/tickets.js?v=33"></script>
-  <script src="js/notifications.js?v=33"></script>
-  <script src="js/app.js?v=33"></script>
+  <script src="js/config.js?v=34"></script>
+  <script src="js/store.js?v=34"></script>
+  <script src="js/api.js?v=34"></script>
+  <script src="js/ui.js?v=34"></script>
+  <script src="js/auth.js?v=34"></script>
+  <script src="js/devices.js?v=34"></script>
+  <script src="js/tickets.js?v=34"></script>
+  <script src="js/notifications.js?v=34"></script>
+  <script src="js/app.js?v=34"></script>
 </body>
 </html>

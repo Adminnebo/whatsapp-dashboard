@@ -683,3 +683,20 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .plat--lock { opacity: .6; cursor: default; }
 .plats__nota { font-size: 12px; color: var(--text-mute); margin-top: 6px; }
 .pill--plat { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 8px; background: var(--bg); color: var(--text-soft); margin-right: 3px; }
+
+/* tickets: pestañas y lista */
+.tk__tabs { display: flex; gap: 4px; padding: 0 22px; border-bottom: 1px solid var(--border); }
+.tk__tab { padding: 10px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-soft); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tk__tab--on { color: var(--brand); border-color: var(--brand); }
+.tk__cargando, .tk__vacio, .tk__err { padding: 26px 8px; text-align: center; color: var(--text-mute); font-size: 13.5px; }
+.tk__err { color: var(--danger); }
+.tkitem { padding: 12px 4px; border-bottom: 1px solid var(--border-soft); }
+.tkitem__top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tkitem__title { font-weight: 600; font-size: 14px; }
+.tkitem__meta { font-size: 12px; color: var(--text-mute); margin-top: 3px; }
+.tkitem__est { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.tkitem__est--nuevo { background: var(--bg); color: var(--text-soft); }
+.tkitem__est--prog { background: #fff3d6; color: #9a6b00; }
+.tkitem__est--ok { background: #d8f5e3; color: #0f7a3d; }
+[data-theme="dark"] .tkitem__est--ok { background: rgba(26,161,121,.2); color: #34d399; }
+[data-theme="dark"] .tkitem__est--prog { background: #3a2f10; color: #e8c66a; }
