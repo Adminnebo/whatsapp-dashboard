@@ -92,7 +92,8 @@ async function logAction(req, action, contactId, detail) {
 app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 // (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
-const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook']);
+// (/tickets/file igual: la abre el gestor de tareas desde fuera, con la firma en la URL)
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
@@ -311,6 +312,15 @@ CREATE TABLE IF NOT EXISTS tickets (
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tickets_ext ON tickets(external_id);
+-- Adjuntos de un ticket (capturas, PDFs…). Igual que los mensajes: el binario vive
+-- en la base, y se sirve por una URL firmada para que el gestor de tareas lo abra.
+CREATE TABLE IF NOT EXISTS ticket_files (
+  id BIGSERIAL PRIMARY KEY,
+  ticket_id BIGINT REFERENCES tickets(id) ON DELETE CASCADE,
+  filename TEXT, mime TEXT, size_bytes BIGINT, data BYTEA,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_files ON ticket_files(ticket_id);
 `;
 async function migrate() { await q(MIGRATIONS); }
 
@@ -322,6 +332,10 @@ const crypto = require('crypto');
 const MEDIA_SECRET = process.env.MEDIA_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'nebo-media-fallback';
 const mediaSig = id => crypto.createHmac('sha256', MEDIA_SECRET).update(String(id)).digest('hex').slice(0, 24);
 const mediaUrlFor = (req, id) => originOf(req) + '/api/media?id=' + id + '&sig=' + mediaSig(id);
+// Los adjuntos de tickets se firman en su propio espacio ('tf:') para que una firma
+// de mensaje no sirva para abrir un adjunto ni al revés.
+const tfSig = id => crypto.createHmac('sha256', MEDIA_SECRET).update('tf:' + id).digest('hex').slice(0, 24);
+const tfUrlFor = (req, id) => originOf(req) + '/api/tickets/file?id=' + id + '&sig=' + tfSig(id);
 
 // --- canales soportados (save-in / save-out) ---
 const CHANNELS_OK = ['whatsapp', 'instagram', 'facebook', 'pagina_web'];
@@ -879,28 +893,101 @@ app.get('/api/wa-templates', wrap(async (req, res) => {
 // El cliente (web/app) manda aquí; nosotros reenviamos con la API key (que nunca
 // sale al navegador). Mapea nuestros campos al formato del project-manager.
 const PRIORIDAD_PM = { baja: 'LOW', media: 'MEDIUM', alta: 'HIGH', urgente: 'URGENT' };
-app.post('/api/tickets', wrap(async (req, res) => {
+
+// Adjuntos: hasta 5 archivos de 10 MB. Límite propio (no el de 64 MB de los
+// mensajes) porque estos van a la base y se enlazan en la tarea.
+const TK_MAX_FILES = 5;
+const TK_MAX_BYTES = 10 * 1024 * 1024;
+const subirAdjuntos = multer({ storage: multer.memoryStorage(), limits: { fileSize: TK_MAX_BYTES, files: TK_MAX_FILES } })
+  .array('archivos', TK_MAX_FILES);
+// multer lanza si el archivo se pasa de tamaño: lo traducimos a un 400 legible.
+const conAdjuntos = (req, res, next) => subirAdjuntos(req, res, err => {
+  if (!err) return next();
+  const grande = err.code === 'LIMIT_FILE_SIZE';
+  const muchos = err.code === 'LIMIT_FILE_COUNT';
+  res.status(400).json({ error: grande ? 'Cada adjunto puede pesar máximo 10 MB'
+    : muchos ? 'Máximo ' + TK_MAX_FILES + ' adjuntos' : 'No se pudieron leer los adjuntos' });
+});
+
+const kb = n => n >= 1024 * 1024 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+
+// Reúne los adjuntos vengan como vengan: multipart (web/app con FormData) o
+// base64 dentro del JSON (integraciones que no pueden mandar multipart).
+function adjuntosDe(req) {
+  const salida = [];
+  for (const f of (req.files || [])) {
+    if (f.buffer && f.buffer.length) salida.push({ nombre: f.originalname || 'adjunto', mime: f.mimetype || 'application/octet-stream', datos: f.buffer });
+  }
+  let lista = (req.body && req.body.adjuntos) || null;
+  if (typeof lista === 'string') { try { lista = JSON.parse(lista); } catch (_) { lista = null; } }
+  for (const a of (Array.isArray(lista) ? lista : [])) {
+    const raw = String(a.base64 || a.data || a.contenido || '').replace(/^data:[^;]+;base64,/, '').replace(/\s/g, '');
+    if (!raw) continue;
+    const buf = Buffer.from(raw, 'base64');
+    if (!buf.length || buf.length > TK_MAX_BYTES) continue;
+    salida.push({ nombre: a.nombre || a.name || a.filename || 'adjunto', mime: a.mime || a.type || 'application/octet-stream', datos: buf });
+  }
+  return salida.slice(0, TK_MAX_FILES);
+}
+
+app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
   const b = req.body || {};
   const asunto = String(b.asunto || '').trim();
   const desc = String(b.descripcion || '').trim();
   if (!asunto || !desc) return res.status(400).json({ error: 'Asunto y descripción son obligatorios' });
   if (!TICKETS_API_KEY) return res.status(500).json({ error: 'Falta TICKETS_API_KEY en el servidor' });
 
-  // Quién lo reporta (de la sesión) para dar contexto en la tarea.
-  const u = b.usuario || {};
+  // Con multipart los campos llegan como texto; `usuario` viaja serializado.
+  let u = b.usuario || {};
+  if (typeof u === 'string') { try { u = JSON.parse(u); } catch (_) { u = {}; } }
   const quien = u.name || u.email || (req.user && req.user.email) || 'desconocido';
+
+  const archivos = adjuntosDe(req);
+
+  // Guardamos el ticket ANTES de llamar al gestor: necesitamos su id para poder
+  // guardar los adjuntos y construir sus enlaces firmados. Si el gestor falla,
+  // deshacemos (el borrado arrastra los adjuntos por la FK).
+  let ticketId = null;
+  try {
+    const r0 = await q(
+      `INSERT INTO tickets (title, description, priority, category, status, origin, app, user_id, user_email, user_name)
+       VALUES ($1,$2,$3,$4,'nuevo',$5,$6,$7,$8,$9) RETURNING id`,
+      [asunto, desc, String(b.prioridad || 'media'), b.categoria || null, b.origen || null, b.app || null,
+       (req.user && req.user.id) || null, u.email || (req.user && req.user.email) || null, u.name || null]);
+    ticketId = r0.rows[0] ? String(r0.rows[0].id) : null;
+  } catch (e) { console.error('[tickets] guardar', e.message); }
+
+  const guardados = [];
+  if (ticketId) {
+    for (const a of archivos) {
+      try {
+        const rf = await q(
+          `INSERT INTO ticket_files (ticket_id, filename, mime, size_bytes, data) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+          [ticketId, a.nombre, a.mime, a.datos.length, a.datos]);
+        guardados.push({ id: String(rf.rows[0].id), nombre: a.nombre, mime: a.mime, bytes: a.datos.length });
+      } catch (e) { console.error('[tickets] adjunto', e.message); }
+    }
+  }
+  const enlaces = guardados.map(f => ({ ...f, url: tfUrlFor(req, f.id) }));
+
   const meta = [
     'Reportado por: ' + quien,
     b.categoria ? 'Categoría: ' + b.categoria : '',
     'Origen: ' + (b.origen || '?') + (b.app ? ' (' + b.app + ')' : '')
   ].filter(Boolean).join('\n');
+  // Los enlaces van dentro de la descripción para que se vean sí o sí, y además
+  // como campo aparte por si el gestor sabe leerlo.
+  const bloqueAdj = enlaces.length
+    ? '\n\nAdjuntos (' + enlaces.length + '):\n' + enlaces.map(f => '- ' + f.nombre + ' (' + kb(f.bytes) + '): ' + f.url).join('\n')
+    : '';
 
   const payload = {
     title: asunto,
-    description: desc + '\n\n— — —\n' + meta,
+    description: desc + '\n\n— — —\n' + meta + bloqueAdj,
     priority: PRIORIDAD_PM[String(b.prioridad || '').toLowerCase()] || 'MEDIUM',
     stage: 'Nuevo'
   };
+  if (enlaces.length) payload.attachments = enlaces.map(f => ({ name: f.nombre, url: f.url, mime: f.mime, size: f.bytes }));
 
   try {
     const r = await fetch(TICKETS_URL, {
@@ -911,6 +998,7 @@ app.post('/api/tickets', wrap(async (req, res) => {
     const txt = await r.text();
     if (!r.ok) {
       console.error('[tickets]', r.status, txt.slice(0, 200));
+      if (ticketId) await q(`DELETE FROM tickets WHERE id=$1::bigint`, [ticketId]).catch(() => {});
       return res.status(502).json({ error: 'El gestor de tareas respondió ' + r.status });
     }
     let data = null; try { data = txt ? JSON.parse(txt) : null; } catch (_) {}
@@ -922,24 +1010,34 @@ app.post('/api/tickets', wrap(async (req, res) => {
       || (data && data.data && data.data.id);
     const externalId = idBruto ? String(idBruto) : null;
     if (!externalId) console.warn('[tickets] el project-manager no devolvió id de tarea; respuesta:', txt.slice(0, 200));
-
-    // Guardamos el ticket para poder listarlo y saber su estado.
-    let saved = null;
-    try {
-      const r2 = await q(
-        `INSERT INTO tickets (title, description, priority, category, status, origin, app, user_id, user_email, user_name, external_id)
-         VALUES ($1,$2,$3,$4,'nuevo',$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [asunto, desc, String(b.prioridad || 'media'), b.categoria || null, b.origen || null, b.app || null,
-         (req.user && req.user.id) || null, u.email || (req.user && req.user.email) || null, u.name || null, externalId]);
-      saved = r2.rows[0] ? String(r2.rows[0].id) : null;
-    } catch (e) { console.error('[tickets] guardar', e.message); }
+    if (ticketId && externalId) await q(`UPDATE tickets SET external_id=$2 WHERE id=$1::bigint`, [ticketId, externalId]).catch(() => {});
 
     await logAction(req, 'ticket', null, 'Creó un ticket: ' + asunto).catch(() => {});
-    res.json({ ok: true, id: saved, externalId, task });
+    res.json({ ok: true, id: ticketId, externalId, adjuntos: enlaces.length, task });
   } catch (e) {
     console.error('[tickets]', e.message);
+    if (ticketId) await q(`DELETE FROM tickets WHERE id=$1::bigint`, [ticketId]).catch(() => {});
     res.status(502).json({ error: 'No se pudo contactar con el gestor de tareas' });
   }
+}));
+
+// Descarga de un adjunto. Va abierta a propósito (el gestor de tareas la abre
+// desde fuera, sin nuestra sesión): la protege la firma HMAC de la URL.
+app.get('/api/tickets/file', wrap(async (req, res) => {
+  const id = String(req.query.id || '');
+  if (!id) return res.status(400).end();
+  if (String(req.query.sig || '') !== tfSig(id)) return res.status(403).end();
+  const r = await q(`SELECT filename, mime, data FROM ticket_files WHERE id=$1::bigint`, [id]);
+  const row = r.rows[0];
+  if (!row || !row.data) return res.status(404).end();
+  res.set('Content-Type', row.mime || 'application/octet-stream');
+  res.set('Cache-Control', 'private, max-age=86400');
+  if (row.filename) {
+    const seguro = String(row.filename).replace(/["\\\r\n]/g, '');
+    // inline: que las imágenes y PDFs se vean en el navegador en vez de descargarse.
+    res.set('Content-Disposition', 'inline; filename="' + seguro + '"');
+  }
+  res.send(row.data);
 }));
 
 // Lista de tickets. Un agente ve los suyos; admin/super_admin ven todos.
@@ -955,10 +1053,29 @@ app.get('/api/tickets', wrap(async (req, res) => {
     `SELECT id, title, description, priority, category, status, origin, user_email, user_name, external_id,
             EXTRACT(EPOCH FROM created_at)*1000 AS created_at, EXTRACT(EPOCH FROM completed_at)*1000 AS completed_at
      FROM tickets ${filtro} ORDER BY created_at DESC LIMIT $1`, params);
+
+  // Adjuntos de los tickets de esta página, en una sola consulta (sin el binario).
+  const ids = r.rows.map(t => String(t.id));
+  const porTicket = new Map();
+  if (ids.length) {
+    const rf = await q(
+      `SELECT id, ticket_id, filename, mime, size_bytes FROM ticket_files
+       WHERE ticket_id = ANY($1::bigint[]) ORDER BY id`, [ids]);
+    for (const f of rf.rows) {
+      const k = String(f.ticket_id);
+      if (!porTicket.has(k)) porTicket.set(k, []);
+      porTicket.get(k).push({
+        id: String(f.id), name: f.filename || 'adjunto', mime: f.mime || null,
+        size: Number(f.size_bytes) || 0, url: tfUrlFor(req, f.id)
+      });
+    }
+  }
+
   res.json({ ok: true, admin: !!esAdmin, tickets: r.rows.map(t => ({
     id: String(t.id), title: t.title, description: t.description, priority: t.priority, category: t.category,
     status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name,
-    createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null
+    createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null,
+    files: porTicket.get(String(t.id)) || []
   })) });
 }));
 

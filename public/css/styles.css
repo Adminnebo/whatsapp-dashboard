@@ -654,6 +654,17 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tk__row { display: flex; gap: 10px; }
 .tk__row .tk__lbl { flex: 1; }
 .tk__err { color: var(--danger); font-size: 13px; margin: 0 0 10px; }
+/* --- adjuntos --- */
+.tk__hint { font-weight: 400; color: var(--text-mute); }
+.tk__area--drop { border-color: var(--brand); background: rgba(47,109,246,.06); }
+.tk__adj { display: block; width: 100%; margin-top: 6px; padding: 9px 12px; border: 1px dashed var(--border); border-radius: 9px; background: var(--input-bg); color: var(--text-soft); font-size: 13px; font-weight: 600; cursor: pointer; }
+.tk__adj:hover { border-color: var(--brand); color: var(--brand); }
+.tk__chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tk__chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 6px 5px 9px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); font-size: 12px; font-weight: 500; color: var(--text); }
+.tk__chip-n { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk__chip-p { color: var(--text-mute); font-size: 11px; }
+.tk__chip-x { width: 18px; height: 18px; border-radius: 4px; color: var(--text-mute); font-size: 15px; line-height: 1; cursor: pointer; }
+.tk__chip-x:hover { background: var(--danger); color: #fff; }
 .tk__enviar { width: 100%; padding: 12px; border-radius: 10px; background: var(--brand); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; }
 .tk__enviar:hover { background: var(--brand-dark); }
 .tk__enviar:disabled { opacity: .6; cursor: default; }
@@ -694,6 +705,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tkitem__top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .tkitem__title { font-weight: 600; font-size: 14px; }
 .tkitem__meta { font-size: 12px; color: var(--text-mute); margin-top: 3px; }
+.tkitem__adjs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.tkitem__adj { display: inline-block; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 8px; border-radius: 7px; background: var(--bg); border: 1px solid var(--border); font-size: 11.5px; color: var(--text-soft); text-decoration: none; }
+.tkitem__adj:hover { border-color: var(--brand); color: var(--brand); }
 .tkitem__est { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
 .tkitem__est--nuevo { background: var(--bg); color: var(--text-soft); }
 .tkitem__est--prog { background: #fff3d6; color: #9a6b00; }

@@ -49,6 +49,31 @@ Ejemplos que aceptamos, todos equivalentes:
 { "id": "cmrx…", "completed": true }
 ```
 
+## Adjuntos
+
+Un ticket puede traer hasta **5 archivos de 10 MB** (capturas, PDFs, etc.). Os
+llegan de **dos formas a la vez**, usad la que os venga mejor:
+
+1. **Dentro de `description`**, al final, como texto plano:
+
+   ```
+   Adjuntos (2):
+   - captura.png (4 KB): https://whatsapp.neboaiconsulting.com/api/tickets/file?id=1&sig=75ff…
+   - reporte.pdf (1 KB): https://whatsapp.neboaiconsulting.com/api/tickets/file?id=2&sig=4384…
+   ```
+
+2. **Como campo `attachments`** en el JSON de creación (si lo ignoráis, no pasa nada):
+
+   ```json
+   "attachments": [
+     { "name": "captura.png", "url": "https://…", "mime": "image/png", "size": 4008 }
+   ]
+   ```
+
+Las URLs **no caducan y no necesitan cabeceras**: van firmadas (HMAC) en el propio
+enlace, así que se abren desde el navegador o se descargan con un `GET` normal.
+Las imágenes y PDFs se sirven `inline` (se ven en el navegador, no se descargan).
+
 ## Respuestas
 
 | Código | Significado |
