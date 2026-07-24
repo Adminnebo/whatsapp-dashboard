@@ -985,9 +985,11 @@ app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
     title: asunto,
     description: desc + '\n\n— — —\n' + meta + bloqueAdj,
     priority: PRIORIDAD_PM[String(b.prioridad || '').toLowerCase()] || 'MEDIUM',
-    stage: 'Nuevo'
+    stage: 'Nuevo',
+    // Va SIEMPRE, aunque esté vacío: así el receptor no tiene que comprobar si
+    // el campo existe, solo recorrerlo.
+    attachments: enlaces.map(f => ({ name: f.nombre, url: f.url, mime: f.mime, size: f.bytes }))
   };
-  if (enlaces.length) payload.attachments = enlaces.map(f => ({ name: f.nombre, url: f.url, mime: f.mime, size: f.bytes }));
 
   try {
     const r = await fetch(TICKETS_URL, {
