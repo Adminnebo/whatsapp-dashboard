@@ -662,6 +662,8 @@
           if (Array.isArray(plats) && plats.length && !plats.includes('inbox')) {
             return mostrarSinAcceso(plats);
           }
+          // Permisos granulares: oculta secciones/botones que el usuario no tiene.
+          if (global.PERMS) { PERMS.set(me && me.permissions); PERMS.aplicar(); }
           if (['admin', 'super_admin'].includes(role)) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
         } catch (_) {}
       }

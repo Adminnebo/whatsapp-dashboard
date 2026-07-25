@@ -40,6 +40,21 @@
     .modal__card h2 { font-size: 16px; margin-bottom: 6px; }
     .modal__card label { margin-top: 12px; }
     .modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+    /* permisos granulares */
+    .permgrp { margin-top: 10px; }
+    .permgrp__h { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; }
+    .permgrp__h b { font-size: 12.5px; color: #d6dae2; }
+    .permgrp__all, .permgrp__none { font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 6px; border: 1px solid #2a2d36; background: #14161b; color: #8b8f9a; cursor: pointer; margin: 0; }
+    .permgrp__all:hover { color: #7aa7f5; border-color: #3574e0; }
+    .permgrp__none:hover { color: #f87171; border-color: #f87171; }
+    .plats { display: flex; flex-wrap: wrap; gap: 6px; }
+    .plat { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 6px 10px; border: 1px solid #2a2d36; border-radius: 8px; background: #14161b; font-size: 12.5px; font-weight: 500; color: #b7bcc7; cursor: pointer; }
+    .plat input { width: auto; margin: 0; }
+    .plat--on { border-color: #3574e0; color: #eaf0fb; background: rgba(53,116,224,.12); }
+    .plat--sens.plat--on { border-color: #eab308; background: rgba(234,179,8,.12); color: #f3e2a6; }
+    .plat--lock { opacity: .6; cursor: default; }
+    .plat .sens { color: #eab308; font-weight: 800; }
+    .plats__nota { font-size: 11.5px; color: #8b8f9a; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -58,8 +73,8 @@
         <div><label>Rol</label><select id="nRole"><option value="agent">Agente</option><option value="admin">Admin</option></select></div>
         <div><label>Usuario GHL</label><select id="nGhl"><option value="">— ninguno —</option></select></div>
         <div style="grid-column:1/-1">
-          <label>Acceso a plataformas</label>
-          <div class="plats" id="nPlats"></div>
+          <label>Permisos por funcionalidad</label>
+          <div id="nPlats"></div>
           <div class="plats__nota" id="nPlatsNota"></div>
         </div>
         <div><button class="btn btn--primary" id="createBtn">Crear</button></div>
@@ -84,8 +99,8 @@
       <label>Nombre</label><input type="text" id="eName" />
       <label>Rol</label><select id="eRole"><option value="agent">Agente</option><option value="admin">Admin</option></select>
       <label>Usuario GHL</label><select id="eGhl"></select>
-      <label>Acceso a plataformas</label>
-      <div class="plats" id="ePlats"></div>
+      <label>Permisos por funcionalidad</label>
+      <div id="ePlats"></div>
       <div class="plats__nota" id="ePlatsNota"></div>
       <label>Nueva contraseña <span class="dim">(vacío = no cambiar)</span></label><input type="text" id="ePass" placeholder="••••••" />
       <div class="modal__actions"><button class="btn" id="eCancel">Cancelar</button><button class="btn btn--primary" id="eSave">Guardar</button></div>
@@ -93,6 +108,7 @@
     </div>
   </div>
 
+  <script src="js/permcatalog.js"></script>
   <script src="js/auth.js"></script>
   <script>
     let ghlUsers = [], usersList = [], editingId = null;
@@ -120,24 +136,35 @@
       $('#nGhl').innerHTML = ghlOptions('');
     }
 
-    // ---- casillas de acceso por plataforma ----
-    const PLATS = [['inbox', 'Conversaciones'], ['cotizaciones', 'Cotizaciones'], ['cobranzas', 'Cobranzas']];
-    // admin/super_admin siempre tienen todas (bloqueadas); a un agente se le eligen.
-    function renderPlats(boxId, notaId, seleccion, role) {
+    // ---- casillas de permisos granulares (agrupadas por plataforma) ----
+    // admin/super_admin siempre tienen TODO (bloqueadas); a un agente se le eligen.
+    function renderPerms(boxId, notaId, seleccion, role) {
       const admin = role === 'admin' || role === 'super_admin';
-      const marcadas = admin ? PLATS.map(p => p[0]) : (seleccion || PLATS.map(p => p[0]));
-      $('#' + boxId).innerHTML = PLATS.map(([k, t]) => {
-        const on = marcadas.includes(k);
-        return `<label class="plat ${on ? 'plat--on' : ''} ${admin ? 'plat--lock' : ''}">
-          <input type="checkbox" value="${k}" ${on ? 'checked' : ''} ${admin ? 'disabled' : ''}> ${t}</label>`;
+      const marcadas = new Set(admin ? PERMS.ALL_KEYS : (Array.isArray(seleccion) ? seleccion : PERMS.ALL_KEYS));
+      const box = $('#' + boxId);
+      box.innerHTML = PERMS.GRUPOS.map(g => {
+        const chips = g.perms.map(p => {
+          const on = marcadas.has(p.key);
+          return `<label class="plat ${on ? 'plat--on' : ''} ${admin ? 'plat--lock' : ''} ${p.sensible ? 'plat--sens' : ''}">
+            <input type="checkbox" value="${p.key}" ${on ? 'checked' : ''} ${admin ? 'disabled' : ''}> ${esc(p.label)}${p.sensible ? ' <span class="sens">•</span>' : ''}</label>`;
+        }).join('');
+        const acc = admin ? '' : `<button type="button" class="permgrp__all" data-all="${g.platform}">todo</button><button type="button" class="permgrp__none" data-none="${g.platform}">nada</button>`;
+        return `<div class="permgrp"><div class="permgrp__h"><b>${esc(g.label)}</b>${acc}</div><div class="plats">${chips}</div></div>`;
       }).join('');
-      $('#' + notaId).textContent = admin ? 'Los administradores tienen acceso a todas las plataformas.' : 'Marca a qué plataformas puede entrar este agente.';
-      // toggle visual al marcar
-      $('#' + boxId).querySelectorAll('.plat input').forEach(i => i.addEventListener('change', e => {
-        e.target.closest('.plat').classList.toggle('plat--on', e.target.checked);
-      }));
+      $('#' + notaId).textContent = admin
+        ? 'Los administradores tienen todos los permisos.'
+        : 'Marca las funcionalidades que puede usar este agente. Las marcadas con • son sensibles.';
+      box.querySelectorAll('.plat input').forEach(i => i.addEventListener('change', e =>
+        e.target.closest('.plat').classList.toggle('plat--on', e.target.checked)));
+      box.querySelectorAll('[data-all]').forEach(b => b.addEventListener('click', () => togGrupo(boxId, b.dataset.all, true)));
+      box.querySelectorAll('[data-none]').forEach(b => b.addEventListener('click', () => togGrupo(boxId, b.dataset.none, false)));
     }
-    function readPlats(boxId) {
+    function togGrupo(boxId, plat, on) {
+      $('#' + boxId).querySelectorAll('.plat input').forEach(i => {
+        if (i.value.split('.')[0] === plat) { i.checked = on; i.closest('.plat').classList.toggle('plat--on', on); }
+      });
+    }
+    function readPerms(boxId) {
       return [...$('#' + boxId).querySelectorAll('.plat input:checked')].map(i => i.value);
     }
 
@@ -162,14 +189,14 @@
     }
 
     // render inicial de las casillas de "crear" + re-render al cambiar el rol
-    renderPlats('nPlats', 'nPlatsNota', null, $('#nRole').value);
-    $('#nRole').addEventListener('change', () => renderPlats('nPlats', 'nPlatsNota', readPlats('nPlats'), $('#nRole').value));
+    renderPerms('nPlats', 'nPlatsNota', null, $('#nRole').value);
+    $('#nRole').addEventListener('change', () => renderPerms('nPlats', 'nPlatsNota', readPerms('nPlats'), $('#nRole').value));
 
     document.getElementById('createBtn').addEventListener('click', async () => {
       const body = {
         email: $('#nEmail').value.trim(), password: $('#nPass').value,
         fullName: $('#nName').value.trim() || null, role: $('#nRole').value, ghlUserId: $('#nGhl').value || null,
-        platforms: readPlats('nPlats')
+        permissions: readPerms('nPlats')
       };
       const m = $('#createMsg');
       const r = await Auth.fetch('/api/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -199,7 +226,7 @@
       const roleSel = $('#eRole');
       if (u.role === 'super_admin') { roleSel.innerHTML = '<option value="super_admin">Super admin (solo por API)</option>'; roleSel.value = 'super_admin'; roleSel.disabled = true; }
       else { roleSel.innerHTML = '<option value="agent">Agente</option><option value="admin">Admin</option>'; roleSel.value = u.role; roleSel.disabled = false; }
-      renderPlats('ePlats', 'ePlatsNota', u.platforms, u.role);
+      renderPerms('ePlats', 'ePlatsNota', u.permissions, u.role);
       $('#ePass').value = '';
       $('#editMsg').textContent = '';
       $('#editModal').hidden = false;
@@ -208,13 +235,13 @@
     $('#eCancel').addEventListener('click', closeEdit);
     $('#editModal').addEventListener('click', e => { if (e.target.id === 'editModal') closeEdit(); });
     // al cambiar el rol en la edición, recalcula las casillas (admin = todas, bloqueadas)
-    $('#eRole').addEventListener('change', () => renderPlats('ePlats', 'ePlatsNota', readPlats('ePlats'), $('#eRole').value));
+    $('#eRole').addEventListener('change', () => renderPerms('ePlats', 'ePlatsNota', readPerms('ePlats'), $('#eRole').value));
 
     $('#eSave').addEventListener('click', async () => {
       if (!editingId) return;
       const patch = { email: $('#eEmail').value.trim(), fullName: $('#eName').value.trim() || null, ghlUserId: $('#eGhl').value || null };
       if (!$('#eRole').disabled) patch.role = $('#eRole').value;   // super_admin no se cambia por el panel
-      patch.platforms = readPlats('ePlats');                       // acceso por plataforma (agentes)
+      patch.permissions = readPerms('ePlats');                     // permisos granulares (agentes)
       const pass = $('#ePass').value; if (pass) patch.password = pass;
       const r = await Auth.fetch('/api/auth/users/' + editingId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
       if (r.ok) { closeEdit(); loadUsers(); }

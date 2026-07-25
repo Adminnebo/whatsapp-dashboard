@@ -7,7 +7,8 @@
 'use strict';
 const express = require('express');
 const { URL, ANON, admin, getProfile } = require('./supabase');
-const { requireAuth, requireAdmin, plataformasDe, PLATAFORMAS } = require('./middleware');
+const { requireAuth, requireAdmin, plataformasDe, permisosDe, PLATAFORMAS } = require('./middleware');
+const { limpiar: limpiarPermisos } = require('./permcatalog');
 
 const router = express.Router();
 const ROLES = ['admin', 'agent'];
@@ -30,7 +31,8 @@ router.get('/me', requireAuth, async (req, res) => {
   res.json({
     id: req.user.id, email: req.user.email, profile: prof || null,
     role: prof ? prof.role : null,
-    platforms: plataformasDe(prof)          // ya resuelve super_admin/admin = todas
+    platforms: plataformasDe(prof),         // ya resuelve super_admin/admin = todas
+    permissions: permisosDe(prof)           // permisos efectivos (para ocultar en el frontend)
   });
 });
 
@@ -45,8 +47,9 @@ router.get('/users', requireAuth, requireAdmin, async (_req, res) => {
     return {
       id: u.id, email: u.email, createdAt: u.created_at, lastSignInAt: u.last_sign_in_at,
       role: p.role || 'agent', fullName: p.full_name || null, ghlUserId: p.ghl_user_id || null,
-      // plataformas concedidas al agente; admin/super_admin siempre todas
-      platforms: plataformasDe(p)
+      // plataformas y permisos concedidos; admin/super_admin siempre todo
+      platforms: plataformasDe(p),
+      permissions: permisosDe(p)
     };
   });
   res.json({ users });
@@ -62,8 +65,16 @@ router.post('/users', requireAuth, requireAdmin, async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
   const id = data.user.id;
   const perfil = { id, email, role, full_name: b.fullName || null, ghl_user_id: b.ghlUserId || null };
-  const plats = limpiarPlataformas(b.platforms);
-  if (plats) perfil.platforms = plats;      // si no manda, la BD pone el default (las 3)
+  const perms = limpiarPermisos(b.permissions);
+  if (perms) {
+    perfil.permissions = perms;
+    // Mantener 'platforms' en sinc con los permisos (una plataforma = tener ≥1
+    // permiso suyo), para que el gate por plataforma no se contradiga.
+    perfil.platforms = [...new Set(perms.map(k => k.split('.')[0]))];
+  } else {
+    const plats = limpiarPlataformas(b.platforms);
+    if (plats) perfil.platforms = plats;    // compat: si mandan solo plataformas
+  }
   const { error: perr } = await admin.from('profiles').upsert(perfil);
   if (perr) return res.status(500).json({ error: 'usuario creado pero falló el perfil: ' + perr.message });
   res.status(201).json({ ok: true, id });
@@ -75,7 +86,12 @@ router.patch('/users/:id', requireAuth, requireAdmin, async (req, res) => {
   if (b.role && ROLES.includes(b.role)) patch.role = b.role;
   if ('fullName' in b) patch.full_name = b.fullName || null;
   if ('ghlUserId' in b) patch.ghl_user_id = b.ghlUserId || null;
-  if ('platforms' in b) { const p = limpiarPlataformas(b.platforms); if (p) patch.platforms = p; }
+  if ('permissions' in b) {
+    const p = limpiarPermisos(b.permissions);
+    if (p) { patch.permissions = p; patch.platforms = [...new Set(p.map(k => k.split('.')[0]))]; }
+  } else if ('platforms' in b) {
+    const p = limpiarPlataformas(b.platforms); if (p) patch.platforms = p;
+  }
   const authUpd = {};
   if (b.password) authUpd.password = String(b.password);
   if (b.email) { authUpd.email = String(b.email).trim().toLowerCase(); patch.email = authUpd.email; }

@@ -21,10 +21,10 @@
       <button class="rail__btn" title="Contactos">
         <svg viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
       </button>
-      <button class="rail__btn" id="btnDevices" title="Dispositivos adicionales">
+      <button class="rail__btn" id="btnDevices" title="Dispositivos adicionales" data-perm="inbox.devices">
         <svg viewBox="0 0 24 24"><path d="M17 1H7a2 2 0 0 0-2 2v18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm0 18H7V5h10v14z"/></svg>
       </button>
-      <button class="rail__btn" id="btnTickets" title="Tickets / soporte">
+      <button class="rail__btn" id="btnTickets" title="Tickets / soporte" data-perm="inbox.tickets">
         <svg viewBox="0 0 24 24"><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v4a2 2 0 0 1 0 4v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4a2 2 0 0 1 0-4zm-9 7.5h-2v-2h2v2zm0-4h-2v-2h2v2zm0-4h-2v-2h2v2z"/></svg>
       </button>
       <div class="rail__spacer"></div>
@@ -46,7 +46,7 @@
       <header class="list__head">
         <div class="list__title-row">
           <h1>Conversaciones</h1>
-          <button class="devbadge" id="devBadge" hidden title="Cambiar de dispositivo"></button>
+          <button class="devbadge" id="devBadge" hidden title="Cambiar de dispositivo" data-perm="inbox.devices"></button>
           <div class="list__title-actions">
             <div class="notif" id="notifWrap">
               <button id="notifBtn" class="notif__btn" title="Notificaciones" aria-label="Notificaciones">
@@ -64,7 +64,7 @@
                 </div>
               </div>
             </div>
-            <button id="botToggle" class="bot-toggle" title="Prender / apagar el chatbot">
+            <button id="botToggle" class="bot-toggle" title="Prender / apagar el chatbot" data-perm="inbox.camila">
               <svg viewBox="0 0 24 24"><path d="M13 3h-2v10h2V3zm4.83 2.17-1.42 1.42A6.92 6.92 0 0 1 19 12a7 7 0 0 1-14 0 6.92 6.92 0 0 1 2.59-5.41L6.17 5.17A8.93 8.93 0 0 0 3 12a9 9 0 0 0 18 0 8.93 8.93 0 0 0-3.17-6.83z"/></svg>
               <span id="botToggleLabel">Bot</span>
             </button>
@@ -124,7 +124,7 @@
           </div>
           <div class="thread__head-actions">
             <button id="btnStar" class="btn-icon" title="Destacar"><svg viewBox="0 0 24 24"><path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg></button>
-            <button id="btnDelete" class="btn-icon btn-icon--danger" title="Eliminar conversación"><svg viewBox="0 0 24 24"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13H6zm4 2h1.5v9H10V9zm2.5 0H14v9h-1.5V9z"/></svg></button>
+            <button id="btnDelete" class="btn-icon btn-icon--danger" title="Eliminar conversación" data-perm="inbox.delete"><svg viewBox="0 0 24 24"><path d="M9 3v1H4v2h16V4h-5V3H9zM6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13H6zm4 2h1.5v9H10V9zm2.5 0H14v9h-1.5V9z"/></svg></button>
           </div>
         </header>
 
@@ -142,14 +142,14 @@
 
         <footer class="composer">
           <div class="composer__tools">
-            <button class="btn-icon" id="btnTemplate" title="Plantillas">
+            <button class="btn-icon" id="btnTemplate" title="Plantillas" data-perm="inbox.templates">
               <svg viewBox="0 0 24 24"><path d="M3 5h18v2H3V5zm0 6h18v2H3v-2zm0 6h12v2H3v-2z"/></svg>
             </button>
-            <button class="btn-icon" id="btnAttach" title="Adjuntar archivo">
+            <button class="btn-icon" id="btnAttach" title="Adjuntar archivo" data-perm="inbox.send">
               <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6h-1.5z"/></svg>
             </button>
             <input type="file" id="fileInput" hidden />
-            <button class="btn-icon" id="btnMic" title="Grabar nota de voz">
+            <button class="btn-icon" id="btnMic" title="Grabar nota de voz" data-perm="inbox.send">
               <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/></svg>
             </button>
             <button class="btn-icon" title="Emoji">
@@ -158,7 +158,7 @@
             <div class="composer__spacer"></div>
             <span class="composer__hint">Enter para enviar · Shift+Enter salto de línea</span>
           </div>
-          <div class="composer__row">
+          <div class="composer__row" data-perm="inbox.send">
             <textarea id="msgInput" rows="1" placeholder="Escribe un mensaje..."></textarea>
             <button id="btnSend" class="btn-send" title="Enviar">
               <svg viewBox="0 0 24 24"><path d="M2.01 21 23 12 2.01 3 2 10l15 2-15 2z"/></svg>
@@ -183,7 +183,7 @@
       <div class="details__head">
         <div class="avatar avatar--lg" id="detAvatar">--</div>
         <div class="details__name" id="detName">--</div>
-        <button id="convToggle" class="pill-toggle pill-toggle--on" title="Encender / apagar a Camila para este contacto (apagar = handoff, la conversación pasa a manual)">
+        <button id="convToggle" class="pill-toggle pill-toggle--on" title="Encender / apagar a Camila para este contacto (apagar = handoff, la conversación pasa a manual)" data-perm="inbox.camila">
           <span class="pill-toggle__dot"></span>
           <span id="convToggleLabel">CAMILA ON</span>
         </button>
@@ -316,6 +316,7 @@
 
   <!-- Scripts clásicos (compatibles con file://, sin paso de build).
        ?v= = cache-busting: súbelo cuando cambies un .js para forzar recarga. -->
+  <script src="js/permcatalog.js"></script>
   <script src="js/config.js?v=34"></script>
   <script src="js/store.js?v=34"></script>
   <script src="js/api.js?v=34"></script>

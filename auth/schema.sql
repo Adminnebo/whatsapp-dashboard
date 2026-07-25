@@ -52,3 +52,18 @@ alter table public.profiles
 -- Los usuarios que ya existen arrancan con las 3 (nadie pierde acceso).
 update public.profiles set platforms = array['inbox','cotizaciones','cobranzas']
   where platforms is null;
+
+-- =========================================================
+-- Control de acceso GRANULAR por funcionalidad (correr una vez en Supabase).
+-- profiles.permissions = lista de claves (ver auth/permcatalog.js), p.ej.
+--   {'inbox.conversations','inbox.send','cobranzas.cartera'}
+-- Reglas:
+--   - super_admin / admin: tienen TODO siempre (no se mira esta columna).
+--   - agent: solo lo que hay en esta lista.
+--   - NULL = sin migrar: el backend deriva los permisos de 'platforms', así
+--     los usuarios actuales NO pierden acceso. Deja NULL y ya se resuelve solo;
+--     en cuanto edites un usuario desde el panel, se le guarda su lista concreta.
+-- El acceso a una plataforma pasa a ser "tener ≥1 permiso de ese prefijo".
+-- =========================================================
+alter table public.profiles
+  add column if not exists permissions text[];

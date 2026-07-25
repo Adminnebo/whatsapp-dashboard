@@ -59,7 +59,9 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 
 
 // ── Autenticación (Supabase) — módulo reutilizable en auth/ ──────────────────
 const authRouter = require('./auth/router');
-const { requireAuth, requireAdmin, requirePlatform } = require('./auth/middleware');
+const { requireAuth, requireAdmin, requirePlatform, requirePermission } = require('./auth/middleware');
+// Atajo: gate de permiso que NO rompe si la auth está desactivada (sin Supabase).
+const need = key => (req, res, next) => (!authConfigured || !req.user) ? next() : requirePermission(key)(req, res, next);
 const { configured: authConfigured, getProfile } = require('./auth/supabase');
 // Nombre del agente logueado (para sent_by). Null si no hay sesión.
 async function agentName(req) {
@@ -468,7 +470,7 @@ app.get('/api/db-setup', wrap(async (_req, res) => { await migrate(); res.json({
 // ?device=<id> devuelve solo las de ese dispositivo QR.
 // Sin parámetro devuelve las del principal (Camila / Cloud API), que son las que
 // tienen device_id NULL: así el inbox de siempre no cambia de comportamiento.
-app.get('/api/conversations', wrap(async (req, res) => {
+app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res) => {
   const device = String(req.query.device || '').trim();
   const todos = asBool(req.query.all);
   let filtro = 'WHERE conv.device_id IS NULL';
@@ -498,7 +500,7 @@ app.get('/api/conversations', wrap(async (req, res) => {
   res.json({ conversations });
 }));
 
-app.get('/api/messages', wrap(async (req, res) => {
+app.get('/api/messages', need('inbox.conversations'), wrap(async (req, res) => {
   const id = String(req.query.conversationId || '');
   if (!id) return res.json({ messages: [] });
   // El UPDATE solo si de verdad hay no leídos: así abrir un chat ya leído no escribe
@@ -614,7 +616,7 @@ app.post('/api/message-cost', wrap(async (req, res) => {
   res.json({ ok: true, updated: r.rowCount });
 }));
 
-app.post('/api/delete-conversation', wrap(async (req, res) => {
+app.post('/api/delete-conversation', need('inbox.delete'), wrap(async (req, res) => {
   const id = String((req.body && req.body.conversationId) || '').replace(/[^0-9]/g, '');
   const cr = await q(`SELECT c.ghl_contact_id FROM conversations cv JOIN contacts c ON c.id=cv.contact_id WHERE cv.id=(NULLIF($1,''))::bigint`, [id]);
   const cid = cr.rows[0] ? cr.rows[0].ghl_contact_id : null;
@@ -634,7 +636,7 @@ app.post('/api/delete-conversation', wrap(async (req, res) => {
 async function getFlag() { const r = await q(`SELECT value FROM app_settings WHERE key='bot_enabled'`); const v = r.rows[0] && r.rows[0].value; return v == null ? true : String(v) === 'true'; }
 app.get('/api/bot-state', wrap(async (_req, res) => res.json({ ok: true, active: await getFlag() })));
 app.get('/api/bot-enabled', wrap(async (_req, res) => res.json({ enabled: await getFlag() })));
-app.post('/api/bot-set', wrap(async (req, res) => {
+app.post('/api/bot-set', need('inbox.camila'), wrap(async (req, res) => {
   const val = asBool(req.body && req.body.active) ? 'true' : 'false';
   await q(`INSERT INTO app_settings (key,value,updated_at) VALUES ('bot_enabled',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [val]);
   await logAction(req, val === 'true' ? 'bot_on' : 'bot_off', null, val === 'true' ? 'Encendió el bot' : 'Apagó el bot');
@@ -649,7 +651,7 @@ async function getHandoffReturnMins() {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 app.get('/api/handoff-config', wrap(async (_req, res) => res.json({ minutes: await getHandoffReturnMins() })));
-app.post('/api/handoff-config', wrap(async (req, res) => {
+app.post('/api/handoff-config', need('inbox.camila'), wrap(async (req, res) => {
   let mins = Math.floor(Number(req.body && req.body.minutes));
   if (!Number.isFinite(mins) || mins < 0) mins = 0;
   await q(`INSERT INTO app_settings (key,value,updated_at) VALUES ('handoff_auto_return_mins',$1,now())
@@ -751,7 +753,7 @@ async function quitarTagHandoff(contactId) {
 // Enciende / apaga a Camila PARA ESE CONTACTO (bot_status = '' | 'STOP' en GHL).
 // Apagar = handoff: el chat se marca en rojo y avisa. Encender lo limpia todo,
 // incluida la etiqueta handoff en GHL.
-app.post('/api/ghl-set-field', wrap(async (req, res) => {
+app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
   const contactId = String((req.body && req.body.contactId) || '').trim();
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
   if (!contactId) return res.json({ ok: false });
@@ -841,7 +843,7 @@ app.post('/api/notifications/read', wrap(async (req, res) => {
 }));
 
 // ---- envío por WhatsApp ----
-app.post('/api/send', wrap(async (req, res) => {
+app.post('/api/send', need('inbox.send'), wrap(async (req, res) => {
   const b = req.body || {};
   const n = normalize({ ...b, type: 'text' }, null, 'out');   // ya trae el canal normalizado
   let msgId = null, sent = false, error = null;
@@ -873,7 +875,7 @@ app.post('/api/send', wrap(async (req, res) => {
 // Lista las plantillas de la WABA (cacheadas 5 min). Solo las APROBADAS por defecto;
 // con ?all=1 devuelve también las pendientes/rechazadas, marcadas con su estado.
 let _tplCache = { at: 0, items: [] };
-app.get('/api/wa-templates', wrap(async (req, res) => {
+app.get('/api/wa-templates', need('inbox.templates'), wrap(async (req, res) => {
   if (!WA_TOKEN) return res.json({ ok: false, error: 'Falta WHATSAPP_TOKEN', templates: [] });
   const waba = await wabaId();
   if (!waba) return res.json({ ok: false, error: 'No se pudo determinar la WABA (define WHATSAPP_WABA_ID)', templates: [] });
@@ -1150,7 +1152,7 @@ app.post('/api/tickets/webhook', wrap(async (req, res) => {
 
 // Envía una plantilla aprobada. Es lo ÚNICO que Meta deja mandar fuera de la
 // ventana de 24 h. Guarda en el historial el texto ya rellenado.
-app.post('/api/send-template', wrap(async (req, res) => {
+app.post('/api/send-template', need('inbox.templates'), wrap(async (req, res) => {
   const b = req.body || {};
   const name = String(b.name || '').trim();
   const lang = String(b.language || '').trim() || 'es';
@@ -1202,7 +1204,7 @@ app.post('/api/send-template', wrap(async (req, res) => {
   res.json({ ok: true, id: saved.id, conversationId: saved.conversationId, wamid, sent: true });
 }));
 
-app.post('/api/send-media', upload.single('file'), wrap(async (req, res) => {
+app.post('/api/send-media', need('inbox.send'), upload.single('file'), wrap(async (req, res) => {
   const b = req.body || {};
   const n = normalize(b, req.file, 'out');
   n.sentBy = await agentName(req);   // quién lo envió (agente logueado)

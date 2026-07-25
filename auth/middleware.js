@@ -7,23 +7,16 @@
    ========================================================= */
 'use strict';
 const { anon, getProfile } = require('./supabase');
+// Catálogo y reglas de acceso (plataforma + permiso granular) en un solo sitio.
+const { PLATAFORMAS, plataformasDe, permisosDe, puede } = require('./permcatalog');
 
 const cache = new Map();            // token -> { user, exp }
 const TTL = 60 * 1000;              // 60s
 
 // ── Acceso por plataforma ────────────────────────────────────────────────────
 // Las tres plataformas comparten login. super_admin y admin ven TODAS siempre;
-// a un 'agent' se le limita con profiles.platforms (array). Si la columna aún no
-// existe (antes de correr la migración en Supabase) o es null, ve todas: así el
-// despliegue no deja a nadie fuera.
-const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas'];
-
-function plataformasDe(profile) {
-  const role = profile && profile.role;
-  if (role === 'super_admin' || role === 'admin') return PLATAFORMAS.slice();
-  const p = profile && profile.platforms;
-  return Array.isArray(p) ? p : PLATAFORMAS.slice();
-}
+// a un 'agent' se le limita. El acceso a una plataforma = tener ≥1 permiso de
+// ese prefijo (lo resuelve permcatalog, con compatibilidad para usuarios viejos).
 
 // Middleware que exige acceso a una plataforma concreta.
 function requirePlatform(key) {
@@ -34,6 +27,22 @@ function requirePlatform(key) {
       req.profile = prof;
       if (!plataformasDe(prof).includes(key)) {
         return res.status(403).json({ error: 'Sin acceso a esta plataforma', platform: key });
+      }
+      next();
+    } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
+  };
+}
+
+// Middleware que exige un permiso granular concreto (p.ej. 'inbox.delete').
+// admin/super_admin lo pasan siempre. Cachea el perfil en req.profile.
+function requirePermission(key) {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+      const prof = req.profile || await getProfile(req.user.id);
+      req.profile = prof;
+      if (!puede(prof, key)) {
+        return res.status(403).json({ error: 'Sin permiso para esta acción', permission: key });
       }
       next();
     } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
@@ -102,4 +111,4 @@ async function requireSuperAdmin(req, res, next) {
   } catch (e) { res.status(500).json({ error: 'auth: ' + e.message }); }
 }
 
-module.exports = { requireAuth, requireAdmin, requireSuperAdmin, optionalAuth, verify, requirePlatform, plataformasDe, PLATAFORMAS };
+module.exports = { requireAuth, requireAdmin, requireSuperAdmin, optionalAuth, verify, requirePlatform, requirePermission, plataformasDe, permisosDe, puede, PLATAFORMAS };
