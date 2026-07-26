@@ -20,6 +20,24 @@ function limpiarPlataformas(v) {
   return set;
 }
 
+// Escribe en profiles TOLERANDO esquemas viejos: si Supabase todavía no tiene la
+// columna 'permissions' (o 'platforms') —la migración aún no corrió—, reintenta
+// sin ella en vez de fallar. Así cambiar la contraseña o el rol nunca se rompe
+// por una columna que falta; los permisos se persistirán al correr el ALTER.
+async function escribirPerfil(op, payload, id) {
+  const run = obj => op === 'upsert'
+    ? admin.from('profiles').upsert(obj)
+    : admin.from('profiles').update(obj).eq('id', id);
+  let { error } = await run(payload);
+  for (const col of ['permissions', 'platforms']) {
+    if (error && (col in payload) && String(error.message || '').includes(`'${col}'`)) {
+      delete payload[col];
+      ({ error } = await run(payload));
+    }
+  }
+  return error;
+}
+
 // Config pública para el frontend (URL + anon key). No expone secretos.
 router.get('/config', (_req, res) => {
   res.json({ supabaseUrl: URL, supabaseAnonKey: ANON, configured: !!(URL && ANON) });
@@ -75,7 +93,7 @@ router.post('/users', requireAuth, requireAdmin, async (req, res) => {
     const plats = limpiarPlataformas(b.platforms);
     if (plats) perfil.platforms = plats;    // compat: si mandan solo plataformas
   }
-  const { error: perr } = await admin.from('profiles').upsert(perfil);
+  const perr = await escribirPerfil('upsert', perfil);
   if (perr) return res.status(500).json({ error: 'usuario creado pero falló el perfil: ' + perr.message });
   res.status(201).json({ ok: true, id });
 });
@@ -100,7 +118,7 @@ router.patch('/users/:id', requireAuth, requireAdmin, async (req, res) => {
     if (error) return res.status(400).json({ error: error.message });
   }
   if (Object.keys(patch).length) {
-    const { error } = await admin.from('profiles').update(patch).eq('id', req.params.id);
+    const error = await escribirPerfil('update', patch, req.params.id);
     if (error) return res.status(400).json({ error: error.message });
   }
   res.json({ ok: true });
