@@ -39,9 +39,16 @@ const CORS_OK = new Set([
   'https://localhost',
   ...String(process.env.CORS_EXTRA || '').split(',').map(s => s.trim()).filter(Boolean)
 ]);
+// La versión web (PWA) sí se sirve desde un dominio propio. Se acepta cualquier
+// subdominio de la casa por https, para no tener que redeployar cada vez que
+// cambie el nombre. CORS_DOMAIN lo cambia; CORS_EXTRA sigue para orígenes sueltos.
+const DOMINIO = String(process.env.CORS_DOMAIN || 'neboaiconsulting.com')
+  .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const CORS_CASA = new RegExp(`^https://([a-z0-9-]+\\.)*${DOMINIO}$`, 'i');
+
 app.use((req, res, next) => {
   const origin = req.get('origin');
-  if (origin && (CORS_OK.has(origin) || /^https?:\/\/localhost(:\d+)?$/.test(origin))) {
+  if (origin && (CORS_OK.has(origin) || CORS_CASA.test(origin) || /^https?:\/\/localhost(:\d+)?$/.test(origin))) {
     res.set('Access-Control-Allow-Origin', origin);
     res.set('Vary', 'Origin');
     res.set('Access-Control-Allow-Credentials', 'true');
