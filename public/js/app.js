@@ -45,6 +45,7 @@
       catch (_) {}
     },
     async toggleBot() {
+      if (this._botEditable === false) { UI.toast('Solo un administrador puede prender o apagar el bot'); return; }
       if (!Store.settings.botSetUrl) return;
       const next = !this._botActive;
       UI.renderBotToggle(next, true);
@@ -664,7 +665,15 @@
           }
           // Permisos granulares: oculta secciones/botones que el usuario no tiene.
           if (global.PERMS) { PERMS.set(me && me.permissions); PERMS.aplicar(); }
-          if (['admin', 'super_admin'].includes(role)) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
+          const esAdmin = ['admin', 'super_admin'].includes(role);
+          if (esAdmin) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
+          // El toggle global del bot SOLO lo cambia admin/super_admin. Los demás lo
+          // ven (para saber el estado) pero no pueden tocarlo.
+          App._botEditable = esAdmin;
+          if (!esAdmin) {
+            const bt = document.querySelector('#botToggle');
+            if (bt) { bt.classList.add('bot-toggle--readonly'); bt.title = 'Solo un administrador puede prender/apagar el bot'; }
+          }
         } catch (_) {}
       }
     }

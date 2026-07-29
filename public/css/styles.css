@@ -139,6 +139,8 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 [data-theme="dark"] .bot-toggle--on { background: rgba(26,161,121,.2); color: #34d399; }
 [data-theme="dark"] .bot-toggle--off { background: rgba(255,255,255,.06); color: var(--text-mute); }
 .bot-toggle.is-loading { opacity: .55; pointer-events: none; }
+/* Solo-lectura: lo ve pero no lo puede cambiar quien no es admin/super_admin */
+.bot-toggle--readonly { cursor: default; opacity: .85; }
 
 /* cargando mensajes (evita que el hilo se vea vacío mientras llega la respuesta) */
 .thread__loading {

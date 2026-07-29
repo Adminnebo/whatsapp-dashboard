@@ -182,8 +182,9 @@
         <td class="dim">${esc(ghlName(u.ghlUserId))}</td>
         <td class="dim">${fmt(u.lastSignInAt)}</td>
         <td class="row-actions">
-          <button class="btn" data-act="edit">Editar</button>
-          <button class="btn btn--danger" data-act="del">Eliminar</button>
+          ${u.role === 'super_admin'
+            ? '<span class="dim">Protegido</span>'
+            : '<button class="btn" data-act="edit">Editar</button> <button class="btn btn--danger" data-act="del">Eliminar</button>'}
         </td>
       </tr>`).join('') || '<tr><td colspan="6" class="dim">Sin usuarios.</td></tr>';
     }

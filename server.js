@@ -69,6 +69,9 @@ const authRouter = require('./auth/router');
 const { requireAuth, requireAdmin, requirePlatform, requirePermission } = require('./auth/middleware');
 // Atajo: gate de permiso que NO rompe si la auth está desactivada (sin Supabase).
 const need = key => (req, res, next) => (!authConfigured || !req.user) ? next() : requirePermission(key)(req, res, next);
+// Igual que need pero exige rol admin/super_admin (no un permiso). Para acciones
+// que solo un administrador puede hacer, p.ej. prender/apagar el bot global.
+const needAdmin = (req, res, next) => (!authConfigured || !req.user) ? next() : requireAdmin(req, res, next);
 const { configured: authConfigured, getProfile } = require('./auth/supabase');
 // Nombre del agente logueado (para sent_by). Null si no hay sesión.
 async function agentName(req) {
@@ -643,7 +646,7 @@ app.post('/api/delete-conversation', need('inbox.delete'), wrap(async (req, res)
 async function getFlag() { const r = await q(`SELECT value FROM app_settings WHERE key='bot_enabled'`); const v = r.rows[0] && r.rows[0].value; return v == null ? true : String(v) === 'true'; }
 app.get('/api/bot-state', wrap(async (_req, res) => res.json({ ok: true, active: await getFlag() })));
 app.get('/api/bot-enabled', wrap(async (_req, res) => res.json({ enabled: await getFlag() })));
-app.post('/api/bot-set', need('inbox.camila'), wrap(async (req, res) => {
+app.post('/api/bot-set', needAdmin, wrap(async (req, res) => {   // toggle global: solo admin/super_admin
   const val = asBool(req.body && req.body.active) ? 'true' : 'false';
   await q(`INSERT INTO app_settings (key,value,updated_at) VALUES ('bot_enabled',$1,now()) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [val]);
   await logAction(req, val === 'true' ? 'bot_on' : 'bot_off', null, val === 'true' ? 'Encendió el bot' : 'Apagó el bot');

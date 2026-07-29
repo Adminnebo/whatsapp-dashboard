@@ -98,7 +98,19 @@ router.post('/users', requireAuth, requireAdmin, async (req, res) => {
   res.status(201).json({ ok: true, id });
 });
 
+// Un super_admin aparece en la lista pero NO se puede editar ni eliminar desde el
+// panel. Devuelve true si bloqueó (ya respondió 403).
+async function protegidoSuper(id, res) {
+  const prof = await getProfile(id);
+  if (prof && prof.role === 'super_admin') {
+    res.status(403).json({ error: 'Un super admin no se puede editar ni eliminar' });
+    return true;
+  }
+  return false;
+}
+
 router.patch('/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  if (await protegidoSuper(req.params.id, res)) return;
   const b = req.body || {};
   const patch = {};
   if (b.role && ROLES.includes(b.role)) patch.role = b.role;
@@ -125,6 +137,7 @@ router.patch('/users/:id', requireAuth, requireAdmin, async (req, res) => {
 });
 
 router.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
+  if (await protegidoSuper(req.params.id, res)) return;
   const { error } = await admin.auth.admin.deleteUser(req.params.id);
   if (error) return res.status(400).json({ error: error.message });
   await admin.from('profiles').delete().eq('id', req.params.id);
