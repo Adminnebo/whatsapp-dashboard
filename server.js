@@ -1054,15 +1054,19 @@ app.get('/api/tickets/file', wrap(async (req, res) => {
   res.send(row.data);
 }));
 
-// Lista de tickets. Un agente ve los suyos; admin/super_admin ven todos.
+// Lista de tickets. Por defecto CADA usuario ve solo los suyos; un admin/super_admin
+// puede pedir todos con ?scope=all (para el interruptor "Míos / Todos").
 app.get('/api/tickets', wrap(async (req, res) => {
   const prof = req.user ? await getProfile(req.user.id).catch(() => null) : null;
-  // Sin sesión (auth desactivada) o admin/super_admin → ve todos; agente → solo los suyos.
   const esAdmin = !req.user || (prof && ['admin', 'super_admin'].includes(prof.role));
+  const hayUsuario = !!(req.user && req.user.id);
+  // Sin sesión (dev/máquina) no hay a quién filtrar → todos. Con sesión: solo los
+  // suyos, salvo que un admin pida explícitamente todos.
+  const verTodos = !hayUsuario || (esAdmin && (req.query.scope === 'all' || asBool(req.query.all)));
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
   const params = [limit];
   let filtro = '';
-  if (!esAdmin) { params.push((req.user && req.user.id) || ''); filtro = 'WHERE user_id = $2'; }
+  if (!verTodos && hayUsuario) { params.push(req.user.id); filtro = 'WHERE user_id = $2'; }
   const r = await q(
     `SELECT id, title, description, priority, category, status, origin, user_email, user_name, external_id,
             EXTRACT(EPOCH FROM created_at)*1000 AS created_at, EXTRACT(EPOCH FROM completed_at)*1000 AS completed_at
@@ -1085,7 +1089,7 @@ app.get('/api/tickets', wrap(async (req, res) => {
     }
   }
 
-  res.json({ ok: true, admin: !!esAdmin, tickets: r.rows.map(t => ({
+  res.json({ ok: true, admin: !!esAdmin, scope: verTodos ? 'all' : 'mine', tickets: r.rows.map(t => ({
     id: String(t.id), title: t.title, description: t.description, priority: t.priority, category: t.category,
     status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name,
     createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null,

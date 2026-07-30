@@ -38,7 +38,12 @@
     adjuntos: [],       // archivos elegidos para el ticket que se está redactando
     _tickets: [],       // últimos tickets cargados
     _admin: false,
-    _filtro: 'todos',   // filtro de estado activo en "Mis tickets"
+    _scope: 'mios',     // 'mios' | 'todos' (solo admin puede ver todos)
+    _filtro: 'todos',   // filtro de estado
+    _prio: 'todas',     // filtro de prioridad
+    _cat: 'todas',      // filtro de categoría
+    _dias: 'todo',      // filtro de fecha
+    _orden: 'recientes',// orden
     _busca: '',         // texto de búsqueda
 
     async quien() {
@@ -76,7 +81,9 @@
       box.innerHTML = '<p class="tk__cargando">Cargando…</p>';
       try {
         const h = {}; if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
-        const d = await (await fetch('/api/tickets', { headers: h })).json();
+        // Por defecto el backend devuelve solo los míos; un admin puede pedir todos.
+        const url = '/api/tickets' + (this._scope === 'todos' ? '?scope=all' : '');
+        const d = await (await fetch(url, { headers: h })).json();
         this._tickets = d.tickets || [];
         this._admin = !!d.admin;
         this.pintarLista();
@@ -85,20 +92,33 @@
       }
     },
 
-    // Barra (filtros con contadores + buscador) y contenedor de filas.
+    // Barra (toggle admin + filtros de estado + buscador + selects) y filas.
     pintarLista() {
       const box = $('#ticketList');
       const cont = { todos: this._tickets.length, nuevo: 0, en_progreso: 0, completado: 0 };
       this._tickets.forEach(t => { if (cont[t.status] != null) cont[t.status]++; });
       const chips = FILTROS.map(([k, lbl]) =>
         `<button class="tkfil ${this._filtro === k ? 'tkfil--on' : ''}" data-tkfiltro="${k}">${lbl}<span class="tkfil__n">${cont[k]}</span></button>`).join('');
+      // Interruptor Míos / Todos, solo para admin/super_admin.
+      const scope = this._admin ? `
+        <div class="tkscope">
+          <button class="tkscope__b ${this._scope === 'mios' ? 'tkscope__b--on' : ''}" data-tkscope="mios">Míos</button>
+          <button class="tkscope__b ${this._scope === 'todos' ? 'tkscope__b--on' : ''}" data-tkscope="todos">Todos</button>
+        </div>` : '';
+      const opt = (v, l, sel) => `<option value="${esc(v)}" ${sel === v ? 'selected' : ''}>${esc(l)}</option>`;
+      const selPrio = `<select id="tkPrio" class="tksel">${opt('todas', 'Prioridad: todas', this._prio)}${PRIORIDADES.map(p => opt(p.v, p.t, this._prio)).join('')}</select>`;
+      const selCat = `<select id="tkCat" class="tksel">${opt('todas', 'Categoría: todas', this._cat)}${CATEGORIAS.map(c => opt(c, c, this._cat)).join('')}</select>`;
+      const selDias = `<select id="tkDias" class="tksel">${[['todo', 'Fecha: todo'], ['hoy', 'Hoy'], ['7', 'Últimos 7 días'], ['30', 'Últimos 30 días']].map(([v, l]) => opt(v, l, this._dias)).join('')}</select>`;
+      const selOrden = `<select id="tkOrden" class="tksel">${[['recientes', 'Orden: recientes'], ['antiguos', 'Orden: antiguos'], ['prioridad', 'Orden: prioridad']].map(([v, l]) => opt(v, l, this._orden)).join('')}</select>`;
       box.innerHTML = `
         <div class="tklist__bar">
+          ${scope}
           <div class="tkfils">${chips}</div>
           <div class="tksearch">
             <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
             <input id="tkBuscar" class="tksearch__inp" type="text" placeholder="Buscar por asunto o descripción…" value="${esc(this._busca)}" />
           </div>
+          <div class="tkfilters">${selPrio}${selCat}${selDias}${selOrden}</div>
         </div>
         <div class="tklist" id="tkItems"></div>`;
       this.pintarItems();
@@ -108,11 +128,28 @@
       const cont = $('#tkItems');
       if (!cont) return;
       const q = this._busca.trim().toLowerCase();
-      let items = this._tickets.filter(t => this._filtro === 'todos' || t.status === this._filtro);
+      const ahora = Date.now();
+      const corte = this._dias === 'hoy' ? new Date().setHours(0, 0, 0, 0)
+        : this._dias === '7' ? ahora - 7 * 864e5
+        : this._dias === '30' ? ahora - 30 * 864e5 : 0;
+      const ORD = { urgente: 0, alta: 1, media: 2, baja: 3 };
+      let items = this._tickets.filter(t =>
+        (this._filtro === 'todos' || t.status === this._filtro) &&
+        (this._prio === 'todas' || (t.priority || 'media') === this._prio) &&
+        (this._cat === 'todas' || t.category === this._cat) &&
+        (!corte || (t.createdAt || 0) >= corte));
       if (q) items = items.filter(t =>
         (t.title || '').toLowerCase().includes(q) ||
         (t.description || '').toLowerCase().includes(q) ||
         (t.userEmail || '').toLowerCase().includes(q));
+      items = items.slice().sort((a, b) => {
+        if (this._orden === 'antiguos') return (a.createdAt || 0) - (b.createdAt || 0);
+        if (this._orden === 'prioridad') {
+          const d = (ORD[a.priority] ?? 2) - (ORD[b.priority] ?? 2);
+          return d || (b.createdAt || 0) - (a.createdAt || 0);
+        }
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      });
       if (!items.length) {
         cont.innerHTML = `<div class="tk__vacio">${this._tickets.length ? 'Ningún ticket coincide con el filtro.' : 'No hay tickets todavía.'}</div>`;
         return;
@@ -303,6 +340,8 @@
         if (e.target.id === 'tkOtro') return this.verNuevo();
         const chip = e.target.closest('[data-tkfiltro]');
         if (chip) return this.aplicarFiltro(chip.dataset.tkfiltro);
+        const sc = e.target.closest('[data-tkscope]');
+        if (sc) { if (this._scope !== sc.dataset.tkscope) { this._scope = sc.dataset.tkscope; this.verLista(); } return; }
         if (e.target.closest('[data-tkback]')) return this.pintarLista();
         const row = e.target.closest('[data-tkid]');
         if (row) return this.abrirDetalle(row.dataset.tkid);
@@ -310,6 +349,12 @@
       // Buscador (solo re-pinta las filas, así no pierde el foco al escribir).
       modal.addEventListener('input', e => {
         if (e.target.id === 'tkBuscar') { this._busca = e.target.value; this.pintarItems(); }
+      });
+      // Selects de filtro (prioridad / categoría / fecha / orden).
+      modal.addEventListener('change', e => {
+        const map = { tkPrio: '_prio', tkCat: '_cat', tkDias: '_dias', tkOrden: '_orden' };
+        const k = map[e.target.id];
+        if (k) { this[k] = e.target.value; this.pintarItems(); }
       });
     }
   };
