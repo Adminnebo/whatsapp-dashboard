@@ -25,9 +25,21 @@
   const MAX_BYTES = 10 * 1024 * 1024;
   const peso = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
   const iconoDe = m => /^image\//.test(m || '') ? '🖼️' : /pdf/.test(m || '') ? '📕' : /^video\//.test(m || '') ? '🎬' : /^audio\//.test(m || '') ? '🎵' : '📎';
+  const esImagen = m => /^image\//.test(m || '');
+
+  // Estado (etiqueta + clase), prioridad (etiqueta) y fechas — compartidos por lista y detalle.
+  const EST = { nuevo: ['Nuevo', 'nuevo'], en_progreso: ['En progreso', 'prog'], completado: ['✓ Completado', 'ok'] };
+  const PRI = { baja: 'Baja', media: 'Media', alta: 'Alta', urgente: 'Urgente' };
+  const FILTROS = [['todos', 'Todos'], ['nuevo', 'Nuevos'], ['en_progreso', 'En progreso'], ['completado', 'Completados']];
+  const fechaCorta = ms => ms ? new Date(ms).toLocaleDateString('es-DO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const fechaLarga = ms => ms ? new Date(ms).toLocaleString('es-DO', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 
   const Tickets = {
-    adjuntos: [],   // archivos elegidos para el ticket que se está redactando
+    adjuntos: [],       // archivos elegidos para el ticket que se está redactando
+    _tickets: [],       // últimos tickets cargados
+    _admin: false,
+    _filtro: 'todos',   // filtro de estado activo en "Mis tickets"
+    _busca: '',         // texto de búsqueda
 
     async quien() {
       // datos del usuario logueado (para adjuntarlos al ticket)
@@ -65,31 +77,92 @@
       try {
         const h = {}; if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
         const d = await (await fetch('/api/tickets', { headers: h })).json();
-        this.pintarLista(d.tickets || [], d.admin);
+        this._tickets = d.tickets || [];
+        this._admin = !!d.admin;
+        this.pintarLista();
       } catch (e) {
         box.innerHTML = `<p class="tk__err">No se pudieron cargar: ${esc(e.message)}</p>`;
       }
     },
 
-    pintarLista(tickets, admin) {
+    // Barra (filtros con contadores + buscador) y contenedor de filas.
+    pintarLista() {
       const box = $('#ticketList');
-      if (!tickets.length) { box.innerHTML = '<p class="tk__vacio">No hay tickets todavía.</p>'; return; }
-      const EST = { nuevo: ['Nuevo', 'nuevo'], en_progreso: ['En progreso', 'prog'], completado: ['✓ Completado', 'ok'] };
-      const PRI = { baja: 'Baja', media: 'Media', alta: 'Alta', urgente: 'Urgente' };
-      const fecha = ms => ms ? new Date(ms).toLocaleDateString('es-DO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-      box.innerHTML = tickets.map(t => {
-        const [et, cls] = EST[t.status] || ['—', 'nuevo'];
-        const adj = (t.files || []).map(f =>
-          `<a class="tkitem__adj" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name)}">${iconoDe(f.mime)} ${esc(f.name)}</a>`).join('');
-        return `<div class="tkitem tkitem--${cls}">
-          <div class="tkitem__top">
-            <span class="tkitem__title">${esc(t.title)}</span>
-            <span class="tkitem__est tkitem__est--${cls}">${et}</span>
+      const cont = { todos: this._tickets.length, nuevo: 0, en_progreso: 0, completado: 0 };
+      this._tickets.forEach(t => { if (cont[t.status] != null) cont[t.status]++; });
+      const chips = FILTROS.map(([k, lbl]) =>
+        `<button class="tkfil ${this._filtro === k ? 'tkfil--on' : ''}" data-tkfiltro="${k}">${lbl}<span class="tkfil__n">${cont[k]}</span></button>`).join('');
+      box.innerHTML = `
+        <div class="tklist__bar">
+          <div class="tkfils">${chips}</div>
+          <div class="tksearch">
+            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+            <input id="tkBuscar" class="tksearch__inp" type="text" placeholder="Buscar por asunto o descripción…" value="${esc(this._busca)}" />
           </div>
-          <div class="tkitem__meta">${esc(PRI[t.priority] || t.priority || '')}${t.category ? ' · ' + esc(t.category) : ''} · ${fecha(t.createdAt)}${admin && t.userEmail ? ' · ' + esc(t.userEmail) : ''}</div>
-          ${adj ? `<div class="tkitem__adjs">${adj}</div>` : ''}
-        </div>`;
+        </div>
+        <div class="tklist" id="tkItems"></div>`;
+      this.pintarItems();
+    },
+
+    pintarItems() {
+      const cont = $('#tkItems');
+      if (!cont) return;
+      const q = this._busca.trim().toLowerCase();
+      let items = this._tickets.filter(t => this._filtro === 'todos' || t.status === this._filtro);
+      if (q) items = items.filter(t =>
+        (t.title || '').toLowerCase().includes(q) ||
+        (t.description || '').toLowerCase().includes(q) ||
+        (t.userEmail || '').toLowerCase().includes(q));
+      if (!items.length) {
+        cont.innerHTML = `<div class="tk__vacio">${this._tickets.length ? 'Ningún ticket coincide con el filtro.' : 'No hay tickets todavía.'}</div>`;
+        return;
+      }
+      cont.innerHTML = items.map(t => {
+        const [et, cls] = EST[t.status] || ['—', 'nuevo'];
+        const pr = t.priority || 'media';
+        const nAdj = (t.files || []).length;
+        return `<button class="tkrow" data-tkid="${esc(t.id)}">
+          <span class="tkrow__pri tkrow__pri--${pr}" title="${PRI[pr] || pr}"></span>
+          <span class="tkrow__main">
+            <span class="tkrow__top">
+              <span class="tkrow__title">${esc(t.title)}</span>
+              <span class="tkitem__est tkitem__est--${cls}">${et}</span>
+            </span>
+            <span class="tkrow__meta">${esc(PRI[pr] || pr)}${t.category ? ' · ' + esc(t.category) : ''} · ${fechaCorta(t.createdAt)}${this._admin && t.userEmail ? ' · ' + esc(t.userEmail) : ''}${nAdj ? ' · 📎 ' + nAdj : ''}</span>
+          </span>
+          <span class="tkrow__go">›</span>
+        </button>`;
       }).join('');
+    },
+
+    aplicarFiltro(k) {
+      this._filtro = k;
+      document.querySelectorAll('.tkfil').forEach(c => c.classList.toggle('tkfil--on', c.dataset.tkfiltro === k));
+      this.pintarItems();
+    },
+
+    // Ficha de un ticket: descripción completa, badges, adjuntos con miniatura.
+    abrirDetalle(id) {
+      const t = this._tickets.find(x => String(x.id) === String(id));
+      if (!t) return;
+      const [et, cls] = EST[t.status] || ['—', 'nuevo'];
+      const pr = t.priority || 'media';
+      const imgs = (t.files || []).filter(f => esImagen(f.mime));
+      const otros = (t.files || []).filter(f => !esImagen(f.mime));
+      $('#ticketList').innerHTML = `
+        <div class="tkdet">
+          <button class="tkdet__back" data-tkback>‹ Volver a la lista</button>
+          <h3 class="tkdet__title">${esc(t.title)}</h3>
+          <div class="tkdet__badges">
+            <span class="tkitem__est tkitem__est--${cls}">${et}</span>
+            <span class="tkbadge tkbadge--${pr}">${esc(PRI[pr] || pr)}</span>
+            ${t.category ? `<span class="tkbadge">${esc(t.category)}</span>` : ''}
+          </div>
+          <div class="tkdet__meta">Creado ${fechaLarga(t.createdAt)}${this._admin && t.userEmail ? ' · por ' + esc(t.userEmail) : ''}${t.completedAt ? ' · Resuelto ' + fechaLarga(t.completedAt) : ''}</div>
+          <div class="tkdet__desc">${esc(t.description || '—').replace(/\n/g, '<br>')}</div>
+          ${imgs.length ? `<div class="tkdet__sec">Capturas</div><div class="tkdet__imgs">${imgs.map(f => `<a class="tkdet__img" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name)}"><img src="${esc(f.url)}" alt="${esc(f.name)}" loading="lazy" /></a>`).join('')}</div>` : ''}
+          ${otros.length ? `<div class="tkdet__sec">Adjuntos</div><div class="tkitem__adjs">${otros.map(f => `<a class="tkitem__adj" href="${esc(f.url)}" target="_blank" rel="noopener">${iconoDe(f.mime)} ${esc(f.name)}</a>`).join('')}</div>` : ''}
+        </div>`;
     },
 
     pintarForm() {
@@ -228,6 +301,15 @@
         if (e.target.dataset.tkview === 'nuevo') return this.verNuevo();
         if (e.target.dataset.tkview === 'lista') return this.verLista();
         if (e.target.id === 'tkOtro') return this.verNuevo();
+        const chip = e.target.closest('[data-tkfiltro]');
+        if (chip) return this.aplicarFiltro(chip.dataset.tkfiltro);
+        if (e.target.closest('[data-tkback]')) return this.pintarLista();
+        const row = e.target.closest('[data-tkid]');
+        if (row) return this.abrirDetalle(row.dataset.tkid);
+      });
+      // Buscador (solo re-pinta las filas, así no pierde el foco al escribir).
+      modal.addEventListener('input', e => {
+        if (e.target.id === 'tkBuscar') { this._busca = e.target.value; this.pintarItems(); }
       });
     }
   };
