@@ -665,6 +665,10 @@
           }
           // Permisos granulares: oculta secciones/botones que el usuario no tiene.
           if (global.PERMS) { PERMS.set(me && me.permissions); PERMS.aplicar(); }
+          // Accesos a las otras plataformas según el acceso del usuario.
+          const tienePlat = k => !Array.isArray(plats) || !plats.length || plats.includes(k);
+          const gc = document.querySelector('#goCotiz'); if (gc && tienePlat('cotizaciones')) gc.hidden = false;
+          const gb = document.querySelector('#goCobranzas'); if (gb && tienePlat('cobranzas')) gb.hidden = false;
           const esAdmin = ['admin', 'super_admin'].includes(role);
           if (esAdmin) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
           // El toggle global del bot SOLO lo cambia admin/super_admin. Los demás lo

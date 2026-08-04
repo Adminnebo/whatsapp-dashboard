@@ -106,6 +106,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .rail__btn:hover { background: var(--rail-soft); color: #fff; }
 .rail__btn--active { background: var(--rail-soft); color: #fff; }
+/* accesos a otras plataformas (emoji) */
+.rail__plat { font-size: 21px; text-decoration: none; line-height: 1; }
+.rail__plat:hover { background: var(--rail-soft); }
 .rail__spacer { flex: 1; }
 #btnTheme .icon-sun { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .rail__avatar {
