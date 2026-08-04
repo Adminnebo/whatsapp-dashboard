@@ -300,7 +300,8 @@ UPDATE messages SET sent_at = created_at WHERE sent_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conv_contact ON conversations(contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
 -- Mapa teléfono → contacto de GHL, para deduplicar sin carreras (solo WhatsApp).
-CREATE TABLE IF NOT EXISTS ghl_phone_map (phone TEXT PRIMARY KEY, contact_id TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
+CREATE TABLE IF NOT EXISTS ghl_phone_map (phone TEXT PRIMARY KEY, contact_id TEXT NOT NULL, contact_name TEXT, created_at TIMESTAMPTZ DEFAULT now());
+ALTER TABLE ghl_phone_map ADD COLUMN IF NOT EXISTS contact_name TEXT;
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT now());
 INSERT INTO app_settings (key, value) VALUES ('bot_enabled', 'true') ON CONFLICT (key) DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('handoff_auto_return_mins', '0') ON CONFLICT (key) DO NOTHING;
@@ -649,13 +650,40 @@ app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
 // cuando llegan varios mensajes de la misma persona a la vez, se SERIALIZAN aquí,
 // así solo UNA ejecución crea el contacto y las demás reciben el mismo ID.
 // Solo WhatsApp (la clave es el número). n8n lo llama y sigue con el contactId.
+// Extrae { phone, name } aceptando el body simple { phone, name } O el webhook
+// de WhatsApp de Meta tal cual (entry[].changes[].value.contacts[]).
+function datosContacto(b) {
+  let phone = b.phone || b.number || null;
+  let name = b.name || null;
+  const raiz = b.entry ? b : (b.body && b.body.entry ? b.body : null);   // webhook directo o envuelto por n8n
+  try {
+    const val = raiz && raiz.entry[0] && raiz.entry[0].changes[0] && raiz.entry[0].changes[0].value;
+    if (val) {
+      const c = val.contacts && val.contacts[0];
+      if (c) { if (!name) name = c.profile && c.profile.name; if (!phone) phone = c.wa_id; }
+      if (!phone && val.messages && val.messages[0]) phone = val.messages[0].from;
+    }
+  } catch (_) {}
+  return { phone, name };
+}
+// Nombre de un contacto de GHL, venga como venga.
+const nombreGhl = c => (c && (c.contactName || c.name || [c.firstName, c.lastName].filter(Boolean).join(' '))) || null;
+const FUENTE = { map: 'mapa', ghl: 'buscar', created: 'create' };
+
 app.post('/api/ghl/contact', wrap(async (req, res) => {
   const b = req.body || {};
-  const digits = String(b.phone || b.number || '').replace(/[^\d]/g, '');
+  const d = datosContacto(b);
+  const digits = String(d.phone || '').replace(/[^\d]/g, '');
   if (!digits) return res.status(400).json({ error: 'Falta el teléfono' });
   if (!GHL_PIT || !LOCATION_ID) return res.status(503).json({ error: 'GHL no está configurado (GHL_PIT / LOCATION_ID)' });
   const e164 = '+' + digits;
   const buscarDup = () => ghl('/contacts/search/duplicate?locationId=' + encodeURIComponent(LOCATION_ID) + '&number=' + encodeURIComponent(e164));
+  // Devuelve en el formato del code node (Contact_ID / Contact_Name / fuente) y también
+  // los campos "planos" por comodidad.
+  const responder = (contactId, contactName, from) => res.json({
+    Contact_ID: contactId, Contact_Name: contactName, fuente: FUENTE[from] || from,
+    contactId, contactName, created: from === 'created', from
+  });
 
   // Conexión dedicada: el advisory lock debe vivir en la misma conexión que la transacción.
   const client = await pool.connect();
@@ -665,35 +693,40 @@ app.post('/api/ghl/contact', wrap(async (req, res) => {
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['ghlc:' + digits]);
 
     // 1) ¿ya resuelto? (aquí caen los mensajes que "perdieron" la carrera → mismo ID)
-    const m = await client.query('SELECT contact_id FROM ghl_phone_map WHERE phone = $1', [digits]);
-    if (m.rows[0]) { await client.query('COMMIT'); return res.json({ contactId: m.rows[0].contact_id, created: false, from: 'map' }); }
+    const m = await client.query('SELECT contact_id, contact_name FROM ghl_phone_map WHERE phone = $1', [digits]);
+    if (m.rows[0]) { await client.query('COMMIT'); return responder(m.rows[0].contact_id, m.rows[0].contact_name, 'map'); }
 
     // 2) ¿existe en GHL? (búsqueda de duplicado por número — casa con y sin '+')
-    let contactId = null, from = null, created = false;
+    let contactId = null, contactName = null, from = null;
     const dup = await buscarDup();
-    if (dup.json && dup.json.contact && dup.json.contact.id) { contactId = dup.json.contact.id; from = 'ghl'; }
+    if (dup.json && dup.json.contact && dup.json.contact.id) { contactId = dup.json.contact.id; contactName = nombreGhl(dup.json.contact); from = 'ghl'; }
 
-    // 3) si no existe, crearlo. El payload de creación lo controla quien llama (b.contact);
-    //    'name'/'phone' sueltos también valen. locationId y teléfono los ponemos nosotros.
+    // 3) si no existe, crearlo. El payload extra lo controla quien llama (b.contact);
+    //    el nombre del webhook y el teléfono los ponemos nosotros.
     if (!contactId) {
       const payload = Object.assign({ locationId: LOCATION_ID, phone: e164 }, b.contact || {});
-      if (b.name && !payload.name && !payload.firstName) payload.name = b.name;
+      if (d.name && !payload.name && !payload.firstName) payload.name = d.name;
       const cr = await ghl('/contacts/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      contactId = (cr.json && (cr.json.contact ? cr.json.contact.id : cr.json.id)) || null;
-      if (contactId) { created = true; from = 'created'; }
+      const c = cr.json && cr.json.contact;
+      contactId = (c ? c.id : (cr.json && cr.json.id)) || null;
+      if (contactId) { contactName = nombreGhl(c) || d.name; from = 'created'; }
       else {
         // GHL pudo rechazar por duplicado si otra vía lo creó en el ínterin: reintenta el buscar.
         const dup2 = await buscarDup();
-        contactId = (dup2.json && dup2.json.contact && dup2.json.contact.id) || null;
+        const c2 = dup2.json && dup2.json.contact;
+        contactId = (c2 && c2.id) || null;
         if (!contactId) { await client.query('ROLLBACK'); return res.status(502).json({ error: 'GHL no devolvió contacto', detail: cr.json }); }
-        from = 'ghl';
+        contactName = nombreGhl(c2); from = 'ghl';
       }
     }
 
-    // 4) guardar en el mapa (idempotente) y cerrar
-    await client.query('INSERT INTO ghl_phone_map (phone, contact_id) VALUES ($1,$2) ON CONFLICT (phone) DO UPDATE SET contact_id = EXCLUDED.contact_id', [digits, contactId]);
+    // 4) guardar en el mapa (idempotente, con nombre) y cerrar
+    await client.query(
+      `INSERT INTO ghl_phone_map (phone, contact_id, contact_name) VALUES ($1,$2,$3)
+       ON CONFLICT (phone) DO UPDATE SET contact_id = EXCLUDED.contact_id, contact_name = COALESCE(EXCLUDED.contact_name, ghl_phone_map.contact_name)`,
+      [digits, contactId, contactName]);
     await client.query('COMMIT');
-    res.json({ contactId, created, from });
+    responder(contactId, contactName, from);
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;
