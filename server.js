@@ -22,7 +22,34 @@ const WA_TOKEN = process.env.WHATSAPP_TOKEN || '';
 const WA_PHONE = process.env.WHATSAPP_PHONE_ID || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const HANDOFF_TAG = process.env.HANDOFF_TAG || 'handoff';
-const CLIENT_CHARGE_OUT = Number(process.env.CLIENT_CHARGE_OUT || 0.03); // lo que se cobra por saliente
+const CLIENT_CHARGE_OUT = Number(process.env.CLIENT_CHARGE_OUT || 0.03); // fallback si el modelo no está configurado
+
+// ── Cobrado por modelo ───────────────────────────────────────────────────────
+// El cobrado ya no es fijo: sale del % configurado por modelo en Ajustes
+// (tabla pct_models, en esta misma base). charged = coste_ia × (1 + %/100).
+// Si no hay coste o el modelo no está configurado, usa la tarifa fija.
+const slugModelo = s => String(s || '').trim().toLowerCase()
+  .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+let _pctCache = { at: 0, byPair: {}, byModel: {} };
+async function pctConfig() {
+  if (Date.now() - _pctCache.at < 30000) return _pctCache;   // cache 30 s
+  try {
+    const r = await q(`SELECT a.slug aslug, m.slug mslug, m.percent FROM pct_models m JOIN pct_agents a ON a.id = m.agent_id`);
+    const byPair = {}, byModel = {};
+    r.rows.forEach(x => { byPair[x.aslug + '|' + x.mslug] = Number(x.percent); byModel[x.mslug] = Number(x.percent); });
+    _pctCache = { at: Date.now(), byPair, byModel };
+  } catch (_) { /* las tablas de config aún no existen: se queda con la tarifa fija */ }
+  return _pctCache;
+}
+async function chargedFor(sentBy, model, costUsd) {
+  const c = Number(costUsd);
+  if (!Number.isFinite(c)) return CLIENT_CHARGE_OUT;
+  const cfg = await pctConfig();
+  const pct = cfg.byPair[slugModelo(sentBy) + '|' + slugModelo(model)] ?? cfg.byModel[slugModelo(model)];
+  if (pct == null || !Number.isFinite(pct)) return CLIENT_CHARGE_OUT;
+  return Math.round(c * (1 + pct / 100) * 1e6) / 1e6;   // hasta 6 decimales
+}
 // Tickets → project-manager. La API key NO va al cliente: se queda aquí.
 const TICKETS_URL = process.env.TICKETS_URL || 'https://project-manager-production-1787.up.railway.app/api/ingest/tasks';
 const TICKETS_API_KEY = process.env.TICKETS_API_KEY || '';
@@ -431,10 +458,12 @@ function normalize(body, file, direction) {
   if (!Number.isFinite(costUsd)) costUsd = null;
   // Id del mensaje: los workflows nuevos mandan `messageId`; se mantiene `wamid` como
   // alias para no romper nada de lo viejo (ni el send/plantillas que ya lo usan).
-  const wamid = body.messageId || body.wamid || null;
+  // Limpiamos un '=' inicial: n8n a veces lo cuela (prefijo de expresión) y si no,
+  // el wamid guardado no casa con el que manda /api/message-cost (coste no se adjunta).
+  const limpiaWamid = v => { const s = v == null ? '' : String(v).trim().replace(/^=+/, ''); return s || null; };
+  const wamid = limpiaWamid(body.messageId || body.wamid);
   // Wamid citado (reply). El multipart lo manda como "" cuando no es reply: se normaliza a null.
-  const rawCtx = body.contextId;
-  const contextId = (rawCtx != null && String(rawCtx).trim() !== '') ? String(rawCtx).trim() : null;
+  const contextId = limpiaWamid(body.contextId);
   return {
     contactId: body.contactId != null ? String(body.contactId) : null,
     name: body.name || null, text, wamid, ts, type,
@@ -603,6 +632,9 @@ app.post('/api/save-in', upload.single('file'), wrap(async (req, res) => {
 app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
   const n = normalize(req.body || {}, req.file, 'out');
   if (!n.sentBy) n.sentBy = process.env.BOT_NAME || 'Camila';   // por defecto, el bot es Camila
+  // Cobrado real por modelo (si ya viene el coste). Si no, queda la tarifa fija y
+  // /api/message-cost lo recalcula cuando llegue el coste.
+  n.chargedUsd = await chargedFor(n.sentBy, n.model, n.costUsd);
   res.json({ ok: true, ...(await saveMessage(n)) });
 }));
 
@@ -612,7 +644,8 @@ app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
 // campos que llegan (COALESCE), así no borra lo ya guardado.
 app.post('/api/message-cost', wrap(async (req, res) => {
   const b = req.body || {};
-  const wamid = b.wamid ? String(b.wamid) : null;
+  // Mismo saneo que al guardar: quita un '=' inicial para que case con el wamid ya guardado.
+  const wamid = ((b.wamid || b.messageId || '') + '').trim().replace(/^=+/, '') || null;
   if (!wamid) return res.status(400).json({ ok: false, error: 'wamid requerido' });
   const model = b.model != null && String(b.model).trim() !== '' ? String(b.model).trim() : null;
   let costUsd = b.costUsd ?? b.cost_usd; costUsd = (costUsd === '' || costUsd == null) ? null : Number(costUsd);
@@ -622,7 +655,13 @@ app.post('/api/message-cost', wrap(async (req, res) => {
   const r = await q(
     `UPDATE messages SET model = COALESCE($2, model), cost_usd = COALESCE($3, cost_usd),
         execution_ms = COALESCE($4, execution_ms)
-     WHERE wamid = $1 RETURNING id`, [wamid, model, costUsd, execMs]);
+     WHERE wamid = $1 RETURNING id, sent_by, model, cost_usd, direction`, [wamid, model, costUsd, execMs]);
+  // Con el coste y el modelo ya definitivos, recalcula el cobrado por el % del modelo.
+  const row = r.rows[0];
+  if (row && row.direction === 'out' && row.cost_usd != null) {
+    const charged = await chargedFor(row.sent_by, row.model, Number(row.cost_usd));
+    await q(`UPDATE messages SET charged_usd = $2 WHERE id = $1`, [row.id, charged]);
+  }
   res.json({ ok: true, updated: r.rowCount });
 }));
 
