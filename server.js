@@ -8,7 +8,7 @@
 const path = require('path');
 const express = require('express');
 const multer = require('multer');
-const { q } = require('./db');
+const { q, pool } = require('./db');
 const { waHash } = require('./wahash');
 
 const app = express();
@@ -132,7 +132,7 @@ app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 // (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
 // (/tickets/file igual: la abre el gestor de tareas desde fuera, con la firma en la URL)
-const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file']);
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/ghl/contact']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
@@ -299,6 +299,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_context_hash ON messages(context_hash);
 UPDATE messages SET sent_at = created_at WHERE sent_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conv_contact ON conversations(contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
+-- Mapa teléfono → contacto de GHL, para deduplicar sin carreras (solo WhatsApp).
+CREATE TABLE IF NOT EXISTS ghl_phone_map (phone TEXT PRIMARY KEY, contact_id TEXT NOT NULL, created_at TIMESTAMPTZ DEFAULT now());
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT now());
 INSERT INTO app_settings (key, value) VALUES ('bot_enabled', 'true') ON CONFLICT (key) DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('handoff_auto_return_mins', '0') ON CONFLICT (key) DO NOTHING;
@@ -642,6 +644,64 @@ app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
 // workflow de "costo IA" que corre DESPUÉS de terminar la ejecución (cuando el
 // runData de n8n ya está completo y se pueden leer los tokens). Solo escribe los
 // campos que llegan (COALESCE), así no borra lo ya guardado.
+// ── Get-or-create de contacto de GHL por TELÉFONO, sin duplicados ────────────
+// Reemplaza el "claim" de n8n. Usa un advisory lock de Postgres por teléfono:
+// cuando llegan varios mensajes de la misma persona a la vez, se SERIALIZAN aquí,
+// así solo UNA ejecución crea el contacto y las demás reciben el mismo ID.
+// Solo WhatsApp (la clave es el número). n8n lo llama y sigue con el contactId.
+app.post('/api/ghl/contact', wrap(async (req, res) => {
+  const b = req.body || {};
+  const digits = String(b.phone || b.number || '').replace(/[^\d]/g, '');
+  if (!digits) return res.status(400).json({ error: 'Falta el teléfono' });
+  if (!GHL_PIT || !LOCATION_ID) return res.status(503).json({ error: 'GHL no está configurado (GHL_PIT / LOCATION_ID)' });
+  const e164 = '+' + digits;
+  const buscarDup = () => ghl('/contacts/search/duplicate?locationId=' + encodeURIComponent(LOCATION_ID) + '&number=' + encodeURIComponent(e164));
+
+  // Conexión dedicada: el advisory lock debe vivir en la misma conexión que la transacción.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Serializa por teléfono. Personas distintas (hash distinto) NO se bloquean entre sí.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['ghlc:' + digits]);
+
+    // 1) ¿ya resuelto? (aquí caen los mensajes que "perdieron" la carrera → mismo ID)
+    const m = await client.query('SELECT contact_id FROM ghl_phone_map WHERE phone = $1', [digits]);
+    if (m.rows[0]) { await client.query('COMMIT'); return res.json({ contactId: m.rows[0].contact_id, created: false, from: 'map' }); }
+
+    // 2) ¿existe en GHL? (búsqueda de duplicado por número — casa con y sin '+')
+    let contactId = null, from = null, created = false;
+    const dup = await buscarDup();
+    if (dup.json && dup.json.contact && dup.json.contact.id) { contactId = dup.json.contact.id; from = 'ghl'; }
+
+    // 3) si no existe, crearlo. El payload de creación lo controla quien llama (b.contact);
+    //    'name'/'phone' sueltos también valen. locationId y teléfono los ponemos nosotros.
+    if (!contactId) {
+      const payload = Object.assign({ locationId: LOCATION_ID, phone: e164 }, b.contact || {});
+      if (b.name && !payload.name && !payload.firstName) payload.name = b.name;
+      const cr = await ghl('/contacts/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      contactId = (cr.json && (cr.json.contact ? cr.json.contact.id : cr.json.id)) || null;
+      if (contactId) { created = true; from = 'created'; }
+      else {
+        // GHL pudo rechazar por duplicado si otra vía lo creó en el ínterin: reintenta el buscar.
+        const dup2 = await buscarDup();
+        contactId = (dup2.json && dup2.json.contact && dup2.json.contact.id) || null;
+        if (!contactId) { await client.query('ROLLBACK'); return res.status(502).json({ error: 'GHL no devolvió contacto', detail: cr.json }); }
+        from = 'ghl';
+      }
+    }
+
+    // 4) guardar en el mapa (idempotente) y cerrar
+    await client.query('INSERT INTO ghl_phone_map (phone, contact_id) VALUES ($1,$2) ON CONFLICT (phone) DO UPDATE SET contact_id = EXCLUDED.contact_id', [digits, contactId]);
+    await client.query('COMMIT');
+    res.json({ contactId, created, from });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}));
+
 app.post('/api/message-cost', wrap(async (req, res) => {
   const b = req.body || {};
   // Mismo saneo que al guardar: quita un '=' inicial para que case con el wamid ya guardado.
