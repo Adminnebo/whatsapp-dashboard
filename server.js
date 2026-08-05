@@ -15,6 +15,10 @@ const app = express();
 app.set('trust proxy', true);   // Railway termina el TLS: sin esto req.protocol siempre sería 'http'
 const PORT = process.env.PORT || 8080;
 
+// ── Seguridad: cabeceras + rate limit ────────────────────────────────────────
+const { hardening, rateLimit } = require('./security');
+hardening(app);   // cabeceras de seguridad, sin x-powered-by (trust proxy ya está en true)
+
 // --- config (variables de entorno) ---
 const GHL_PIT = process.env.GHL_PIT || '';
 const LOCATION_ID = process.env.LOCATION_ID || '';
@@ -136,6 +140,15 @@ const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
+
+// Rate limit por IP (dos niveles). Los endpoints de máquina (n8n/Meta) reciben
+// mucho tráfico legítimo → límite alto; el resto (paneles/usuarios) más estricto.
+// Configurable por env; los defaults son holgados para no estrangular a nadie.
+const esMaquina = req => OPEN_API.has(req.path);
+const RL_WIN = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
+app.use('/api', rateLimit({ windowMs: RL_WIN, max: Number(process.env.RATE_LIMIT_MACHINE || 1200), skip: req => !esMaquina(req) }));
+app.use('/api', rateLimit({ windowMs: RL_WIN, max: Number(process.env.RATE_LIMIT_USER || 300), skip: esMaquina }));
+
 app.use('/api', (req, res, next) => {
   if (!authConfigured) return next();                    // sin Supabase configurado: modo abierto (no rompe)
   if (req.path.startsWith('/auth/')) return next();      // el router de auth se protege solo
