@@ -6,11 +6,18 @@
    ========================================================= */
 'use strict';
 
-// Cabeceras de seguridad. NO ponemos CSP: los paneles usan scripts/estilos
-// inline y una CSP estricta los rompería; el resto sí endurece.
+// Framers permitidos: el propio panel + GoHighLevel (los paneles se embeben como
+// iframe dentro de la subcuenta de GHL). Configurable por env FRAME_ANCESTORS.
+const FRAME_ANCESTORS = process.env.FRAME_ANCESTORS ||
+  "'self' https://app.gohighlevel.com https://*.gohighlevel.com https://*.leadconnectorhq.com";
+
+// Cabeceras de seguridad. La única CSP que ponemos es frame-ancestors (controla
+// quién puede embeber); no tocamos scripts/estilos inline que usan los paneles.
 function securityHeaders(_req, res, next) {
   res.setHeader('X-Content-Type-Options', 'nosniff');                       // no adivinar el MIME
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');                           // anti-clickjacking
+  // OJO: NO usar X-Frame-Options: SAMEORIGIN → bloquea el iframe de GHL. El
+  // control de embebido se hace SOLO con frame-ancestors (permite allowlist).
+  res.setHeader('Content-Security-Policy', 'frame-ancestors ' + FRAME_ANCESTORS);
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-XSS-Protection', '0');                                   // desactiva el filtro legacy (recomendado)
   res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains'); // 180 días HTTPS
