@@ -5,6 +5,16 @@
    en los 3 backends (inbox, cotizaciones, cobranzas).
    ========================================================= */
 'use strict';
+const crypto = require('crypto');
+
+// Compara tokens/API keys en tiempo constante (evita timing attacks). La longitud
+// no es secreta, así que un desajuste de largo devuelve false directo.
+function safeEqual(a, b) {
+  a = String(a == null ? '' : a);
+  b = String(b == null ? '' : b);
+  if (a.length !== b.length || a.length === 0) return false;
+  try { return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch (_) { return false; }
+}
 
 // Framers permitidos: el propio panel + GoHighLevel (los paneles se embeben como
 // iframe dentro de la subcuenta de GHL). Configurable por env FRAME_ANCESTORS.
@@ -66,4 +76,4 @@ function rateLimit(opts = {}) {
   };
 }
 
-module.exports = { hardening, securityHeaders, rateLimit };
+module.exports = { hardening, securityHeaders, rateLimit, safeEqual };

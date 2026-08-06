@@ -173,7 +173,7 @@ function originOf(req) {
   const proto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim();
   return proto + '://' + req.get('host');
 }
-const wrap = fn => (req, res) => Promise.resolve(fn(req, res)).catch(e => { console.error(req.path, e); res.status(500).json({ error: e.message }); });
+const wrap = fn => (req, res) => Promise.resolve(fn(req, res)).catch(e => { console.error(req.path, e); res.status(500).json({ error: 'Error interno del servidor' }); });
 
 async function ghl(pathname, opts = {}) {
   const res = await fetch('https://services.leadconnectorhq.com' + pathname, {
