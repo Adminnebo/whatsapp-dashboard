@@ -141,13 +141,15 @@ const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
 
-// Rate limit por IP (dos niveles). Los endpoints de máquina (n8n/Meta) reciben
-// mucho tráfico legítimo → límite alto; el resto (paneles/usuarios) más estricto.
-// Configurable por env; los defaults son holgados para no estrangular a nadie.
+// Rate limit por IP SOLO para el panel/usuarios. Los endpoints de máquina
+// (n8n/Meta: save-in/out, ghl/contact, message-cost, webhooks…) van EXENTOS:
+// traen su propia API key/firma y deben aguantar ráfagas de concurrencia.
 const esMaquina = req => OPEN_API.has(req.path);
-const RL_WIN = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
-app.use('/api', rateLimit({ windowMs: RL_WIN, max: Number(process.env.RATE_LIMIT_MACHINE || 1200), skip: req => !esMaquina(req) }));
-app.use('/api', rateLimit({ windowMs: RL_WIN, max: Number(process.env.RATE_LIMIT_USER || 300), skip: esMaquina }));
+app.use('/api', rateLimit({
+  windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
+  max: Number(process.env.RATE_LIMIT_USER || 300),
+  skip: esMaquina
+}));
 
 app.use('/api', (req, res, next) => {
   if (!authConfigured) return next();                    // sin Supabase configurado: modo abierto (no rompe)
