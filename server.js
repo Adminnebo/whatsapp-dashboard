@@ -136,7 +136,7 @@ app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 // (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
 // (/tickets/file igual: la abre el gestor de tareas desde fuera, con la firma en la URL)
-const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/ghl/contact']);
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/ghl/contact', '/contact']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
@@ -314,9 +314,13 @@ CREATE INDEX IF NOT EXISTS idx_messages_context_hash ON messages(context_hash);
 UPDATE messages SET sent_at = created_at WHERE sent_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conv_contact ON conversations(contact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_contacts_ghl ON contacts(ghl_contact_id);
--- Mapa teléfono → contacto de GHL, para deduplicar sin carreras (solo WhatsApp).
-CREATE TABLE IF NOT EXISTS ghl_phone_map (phone TEXT PRIMARY KEY, contact_id TEXT NOT NULL, contact_name TEXT, created_at TIMESTAMPTZ DEFAULT now());
-ALTER TABLE ghl_phone_map ADD COLUMN IF NOT EXISTS contact_name TEXT;
+-- Contactos en NUESTRA base (sin GHL): Meta manda unos con teléfono (wa_id) y
+-- otros solo con id (user_id, p.ej. US.101...). Guardamos ambos + custom fields.
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS user_id TEXT;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS custom_fields JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+CREATE INDEX IF NOT EXISTS idx_contacts_phone ON contacts(phone) WHERE phone IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id) WHERE user_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT now());
 INSERT INTO app_settings (key, value) VALUES ('bot_enabled', 'true') ON CONFLICT (key) DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('handoff_auto_return_mins', '0') ON CONFLICT (key) DO NOTHING;
@@ -482,8 +486,12 @@ function normalize(body, file, direction) {
   const wamid = limpiaWamid(body.messageId || body.wamid);
   // Wamid citado (reply). El multipart lo manda como "" cuando no es reply: se normaliza a null.
   const contextId = limpiaWamid(body.contextId);
+  // Id de usuario de Meta (US.101…): identifica al contacto cuando NO viene teléfono.
+  const rawUid = body.userId ?? body.user_id ?? body.from_user_id ?? body.fromUserId;
+  const userId = rawUid != null && String(rawUid).trim() !== '' ? String(rawUid).trim() : null;
   return {
     contactId: body.contactId != null ? String(body.contactId) : null,
+    userId,
     name: body.name || null, text, wamid, ts, type,
     direction, status: body.status || (direction === 'in' ? 'received' : 'sent'),
     phone, channel: ch, mediaUrl, mediaMime, mediaName, preview, mediaData, executionMs: execMs, label, model, costUsd,
@@ -500,9 +508,19 @@ function normalize(body, file, direction) {
 }
 
 const SAVE_SQL = `
-WITH existing AS (SELECT id FROM contacts WHERE ($1::text IS NOT NULL AND ghl_contact_id = $1::text) OR ($9::text IS NOT NULL AND phone = $9::text) ORDER BY CASE WHEN ghl_contact_id = $1::text THEN 0 ELSE 1 END LIMIT 1),
-upd AS (UPDATE contacts SET ghl_contact_id = COALESCE(contacts.ghl_contact_id, $1), name = COALESCE($2, contacts.name), phone = COALESCE($9, contacts.phone) WHERE id = (SELECT id FROM existing) RETURNING id),
-ins AS (INSERT INTO contacts (ghl_contact_id, name, phone) SELECT $1, $2, $9 WHERE NOT EXISTS (SELECT 1 FROM existing) RETURNING id),
+WITH existing AS (SELECT id FROM contacts
+  WHERE ($1::text  IS NOT NULL AND ghl_contact_id = $1::text)
+     OR ($27::text IS NOT NULL AND user_id       = $27::text)
+     OR ($9::text  IS NOT NULL AND phone          = $9::text)
+  ORDER BY CASE WHEN ghl_contact_id = $1::text THEN 0 WHEN user_id = $27::text THEN 1 ELSE 2 END LIMIT 1),
+upd AS (UPDATE contacts SET
+    ghl_contact_id = COALESCE(contacts.ghl_contact_id, $1),
+    user_id        = COALESCE(contacts.user_id, $27),
+    name           = COALESCE($2, contacts.name),
+    phone          = COALESCE($9, contacts.phone),
+    updated_at     = now()
+  WHERE id = (SELECT id FROM existing) RETURNING id),
+ins AS (INSERT INTO contacts (ghl_contact_id, user_id, name, phone) SELECT $1, $27, $2, $9 WHERE NOT EXISTS (SELECT 1 FROM existing) RETURNING id),
 c AS (SELECT id FROM upd UNION ALL SELECT id FROM ins),
 conv AS (INSERT INTO conversations (contact_id, channel, device_id, last_message, last_message_at, last_direction, last_status, last_inbound, unread_count, status, updated_at)
   SELECT c.id, $10, $26, $14, to_timestamp($5::double precision), $7, $8, CASE WHEN $7='in' THEN to_timestamp($5::double precision) ELSE NULL END, CASE WHEN $7='in' THEN 1 ELSE 0 END, 'open', now() FROM c
@@ -514,7 +532,7 @@ INSERT INTO messages (conversation_id, wamid, direction, type, text, status, cha
   ON CONFLICT (wamid) DO NOTHING RETURNING id, conversation_id;`;
 
 async function saveMessage(n) {
-  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null, n.messageHash ?? null, n.contextId ?? null, n.contextHash ?? null, n.sentAt ?? null, n.deviceId ?? null];
+  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null, n.messageHash ?? null, n.contextId ?? null, n.contextHash ?? null, n.sentAt ?? null, n.deviceId ?? null, n.userId ?? null];
   const r = await q(SAVE_SQL, params);
   const row = r.rows[0] || {};
   return { id: row.id != null ? String(row.id) : null, conversationId: row.conversation_id != null ? String(row.conversation_id) : null };
@@ -665,83 +683,72 @@ app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
 // cuando llegan varios mensajes de la misma persona a la vez, se SERIALIZAN aquí,
 // así solo UNA ejecución crea el contacto y las demás reciben el mismo ID.
 // Solo WhatsApp (la clave es el número). n8n lo llama y sigue con el contactId.
-// Extrae { phone, name } aceptando el body simple { phone, name } O el webhook
-// de WhatsApp de Meta tal cual (entry[].changes[].value.contacts[]).
+// Extrae { phone, userId, name } aceptando el body simple O el webhook de WhatsApp
+// de Meta tal cual. Meta manda unos contactos con teléfono (wa_id) y otros solo
+// con id (user_id / from_user_id, p.ej. US.101…): guardamos el que venga.
 function datosContacto(b) {
   let phone = b.phone || b.number || null;
+  let userId = b.userId || b.user_id || b.from_user_id || null;
   let name = b.name || null;
   const raiz = b.entry ? b : (b.body && b.body.entry ? b.body : null);   // webhook directo o envuelto por n8n
   try {
     const val = raiz && raiz.entry[0] && raiz.entry[0].changes[0] && raiz.entry[0].changes[0].value;
     if (val) {
       const c = val.contacts && val.contacts[0];
-      if (c) { if (!name) name = c.profile && c.profile.name; if (!phone) phone = c.wa_id; }
-      if (!phone && val.messages && val.messages[0]) phone = val.messages[0].from;
+      if (c) { if (!name) name = c.profile && c.profile.name; if (!phone) phone = c.wa_id; if (!userId) userId = c.user_id; }
+      const msg = val.messages && val.messages[0];
+      if (msg) { if (!phone) phone = msg.from; if (!userId) userId = msg.from_user_id; }
     }
   } catch (_) {}
-  return { phone, name };
+  phone = phone ? String(phone).replace(/[^\d]/g, '') || null : null;
+  userId = userId ? String(userId).trim() || null : null;
+  return { phone, userId, name };
 }
-// Nombre de un contacto de GHL, venga como venga.
-const nombreGhl = c => (c && (c.contactName || c.name || [c.firstName, c.lastName].filter(Boolean).join(' '))) || null;
-const FUENTE = { map: 'mapa', ghl: 'buscar', created: 'create' };
 
-app.post('/api/ghl/contact', wrap(async (req, res) => {
+// Get-or-create de contacto en NUESTRA base (sin GHL), por teléfono O user_id.
+// Atómico: advisory lock por identidad → sin duplicados bajo concurrencia.
+// Devuelve el formato del code node (Contact_ID / Contact_Name / fuente).
+app.post(['/api/contact', '/api/ghl/contact'], wrap(async (req, res) => {
   const b = req.body || {};
   const d = datosContacto(b);
-  const digits = String(d.phone || '').replace(/[^\d]/g, '');
-  if (!digits) return res.status(400).json({ error: 'Falta el teléfono' });
-  if (!GHL_PIT || !LOCATION_ID) return res.status(503).json({ error: 'GHL no está configurado (GHL_PIT / LOCATION_ID)' });
-  const e164 = '+' + digits;
-  const buscarDup = () => ghl('/contacts/search/duplicate?locationId=' + encodeURIComponent(LOCATION_ID) + '&number=' + encodeURIComponent(e164));
-  // Devuelve en el formato del code node (Contact_ID / Contact_Name / fuente) y también
-  // los campos "planos" por comodidad.
-  const responder = (contactId, contactName, from) => res.json({
-    Contact_ID: contactId, Contact_Name: contactName, fuente: FUENTE[from] || from,
-    contactId, contactName, created: from === 'created', from
-  });
+  if (!d.phone && !d.userId) return res.status(400).json({ error: 'Falta teléfono (wa_id) o user_id' });
+  const clave = d.userId || d.phone;   // el lock prefiere el user_id (más estable)
+  const custom = (b.customFields || b.custom_fields || b.contact) || null;
 
-  // Conexión dedicada: el advisory lock debe vivir en la misma conexión que la transacción.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Serializa por teléfono. Personas distintas (hash distinto) NO se bloquean entre sí.
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['ghlc:' + digits]);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['contact:' + clave]);
 
-    // 1) ¿ya resuelto? (aquí caen los mensajes que "perdieron" la carrera → mismo ID)
-    const m = await client.query('SELECT contact_id, contact_name FROM ghl_phone_map WHERE phone = $1', [digits]);
-    if (m.rows[0]) { await client.query('COMMIT'); return responder(m.rows[0].contact_id, m.rows[0].contact_name, 'map'); }
+    // Buscar por user_id O teléfono (prioriza user_id).
+    const f = await client.query(
+      `SELECT id, phone, user_id, name FROM contacts
+       WHERE ($1::text IS NOT NULL AND user_id = $1::text) OR ($2::text IS NOT NULL AND phone = $2::text)
+       ORDER BY CASE WHEN user_id = $1::text THEN 0 ELSE 1 END LIMIT 1`, [d.userId, d.phone]);
 
-    // 2) ¿existe en GHL? (búsqueda de duplicado por número — casa con y sin '+')
-    let contactId = null, contactName = null, from = null;
-    const dup = await buscarDup();
-    if (dup.json && dup.json.contact && dup.json.contact.id) { contactId = dup.json.contact.id; contactName = nombreGhl(dup.json.contact); from = 'ghl'; }
-
-    // 3) si no existe, crearlo. El payload extra lo controla quien llama (b.contact);
-    //    el nombre del webhook y el teléfono los ponemos nosotros.
-    if (!contactId) {
-      const payload = Object.assign({ locationId: LOCATION_ID, phone: e164 }, b.contact || {});
-      if (d.name && !payload.name && !payload.firstName) payload.name = d.name;
-      const cr = await ghl('/contacts/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      const c = cr.json && cr.json.contact;
-      contactId = (c ? c.id : (cr.json && cr.json.id)) || null;
-      if (contactId) { contactName = nombreGhl(c) || d.name; from = 'created'; }
-      else {
-        // GHL pudo rechazar por duplicado si otra vía lo creó en el ínterin: reintenta el buscar.
-        const dup2 = await buscarDup();
-        const c2 = dup2.json && dup2.json.contact;
-        contactId = (c2 && c2.id) || null;
-        if (!contactId) { await client.query('ROLLBACK'); return res.status(502).json({ error: 'GHL no devolvió contacto', detail: cr.json }); }
-        contactName = nombreGhl(c2); from = 'ghl';
-      }
+    let row, created = false;
+    if (f.rows[0]) {
+      // Rellena lo que falte (teléfono/id/nombre) y funde custom fields si vinieron.
+      const u = await client.query(
+        `UPDATE contacts SET
+           user_id = COALESCE(user_id, $2), phone = COALESCE(phone, $3), name = COALESCE(name, $4),
+           custom_fields = CASE WHEN $5::jsonb IS NOT NULL THEN COALESCE(custom_fields,'{}'::jsonb) || $5::jsonb ELSE custom_fields END,
+           updated_at = now()
+         WHERE id = $1 RETURNING id, phone, user_id, name`,
+        [f.rows[0].id, d.userId, d.phone, d.name, custom ? JSON.stringify(custom) : null]);
+      row = u.rows[0];
+    } else {
+      const i = await client.query(
+        `INSERT INTO contacts (phone, user_id, name, custom_fields)
+         VALUES ($1, $2, $3, COALESCE($4::jsonb, '{}'::jsonb)) RETURNING id, phone, user_id, name`,
+        [d.phone, d.userId, d.name, custom ? JSON.stringify(custom) : null]);
+      row = i.rows[0]; created = true;
     }
-
-    // 4) guardar en el mapa (idempotente, con nombre) y cerrar
-    await client.query(
-      `INSERT INTO ghl_phone_map (phone, contact_id, contact_name) VALUES ($1,$2,$3)
-       ON CONFLICT (phone) DO UPDATE SET contact_id = EXCLUDED.contact_id, contact_name = COALESCE(EXCLUDED.contact_name, ghl_phone_map.contact_name)`,
-      [digits, contactId, contactName]);
     await client.query('COMMIT');
-    responder(contactId, contactName, from);
+    res.json({
+      Contact_ID: String(row.id), Contact_Name: row.name, fuente: created ? 'create' : 'existente',
+      contactId: String(row.id), phone: row.phone, userId: row.user_id, name: row.name, created
+    });
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw e;
@@ -775,7 +782,7 @@ app.post('/api/message-cost', wrap(async (req, res) => {
 
 app.post('/api/delete-conversation', need('inbox.delete'), wrap(async (req, res) => {
   const id = String((req.body && req.body.conversationId) || '').replace(/[^0-9]/g, '');
-  const cr = await q(`SELECT c.ghl_contact_id FROM conversations cv JOIN contacts c ON c.id=cv.contact_id WHERE cv.id=(NULLIF($1,''))::bigint`, [id]);
+  const cr = await q(`SELECT c.ghl_contact_id, c.phone, c.user_id FROM conversations cv JOIN contacts c ON c.id=cv.contact_id WHERE cv.id=(NULLIF($1,''))::bigint`, [id]);
   const cid = cr.rows[0] ? cr.rows[0].ghl_contact_id : null;
   const r = await q(`DELETE FROM conversations WHERE id=(NULLIF($1,''))::bigint RETURNING id`, [id]);
   const row = r.rows[0];
@@ -784,6 +791,8 @@ app.post('/api/delete-conversation', need('inbox.delete'), wrap(async (req, res)
     // (si no, se quedaría marcado para siempre e inflaría el contador de la pestaña).
     if (cid) await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
                       WHERE ghl_contact_id = $1`, [cid]);
+    // Espejo → bot ON (si vuelve a escribir, que el bot no quede mudo en Supabase).
+    if (cr.rows[0]) await mirrorBotActive({ phone: cr.rows[0].phone, userId: cr.rows[0].user_id, active: true });
     await logAction(req, 'conv_delete', cid, 'Eliminó la conversación');
   }
   res.json({ ok: true, deleted: !!row, id: row ? String(row.id) : null });
@@ -907,9 +916,40 @@ async function quitarTagHandoff(contactId) {
   return r.ok;
 }
 
+// ── Espejo del handoff a Supabase ────────────────────────────────────────────
+// Railway es la fuente de verdad (contacts.handoff = rojo + notificaciones). En
+// cada cambio reflejamos bot_active en la tabla contacts de Supabase para que la
+// RPC contact_upsert / el nodo "Active Bot?" de n8n respeten lo que se apaga o
+// enciende desde el inbox. bot_active = !handoff. Best-effort: si falla no bloquea.
+// Env dedicadas (el Supabase de contactos puede NO ser el del login):
+const SB_URL = (process.env.SUPABASE_CONTACTS_URL || process.env.SUPABASE_URL || '').replace(/\/$/, '');
+const SB_KEY = process.env.SUPABASE_CONTACTS_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+async function mirrorBotActive({ phone, userId, active }) {
+  if (!SB_URL || !SB_KEY) return;                 // sin Supabase configurado → no-op
+  if (!phone && !userId) return;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const r = await fetch(SB_URL + '/rest/v1/rpc/contact_set_bot', {
+      method: 'POST', signal: ctrl.signal,
+      headers: { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_active: !!active, p_user_id: userId || null, p_phone: phone || null })
+    });
+    clearTimeout(t);
+    if (!r.ok) console.error('[mirror] contact_set_bot', r.status, (await r.text().catch(() => '')).slice(0, 200));
+  } catch (e) { console.error('[mirror] contact_set_bot', e.message); }
+}
+// Refleja por ghl_contact_id: busca phone/user_id del contacto y espeja.
+async function mirrorByGhl(ghlId, active) {
+  try {
+    const cc = await q(`SELECT phone, user_id FROM contacts WHERE ghl_contact_id = $1 LIMIT 1`, [ghlId]);
+    if (cc.rows[0]) await mirrorBotActive({ phone: cc.rows[0].phone, userId: cc.rows[0].user_id, active });
+  } catch (e) { console.error('[mirror] byGhl', e.message); }
+}
+
 // Enciende / apaga a Camila PARA ESE CONTACTO (bot_status = '' | 'STOP' en GHL).
 // Apagar = handoff: el chat se marca en rojo y avisa. Encender lo limpia todo,
-// incluida la etiqueta handoff en GHL.
+// incluida la etiqueta handoff en GHL. Además espeja bot_active en Supabase.
 app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
   const contactId = String((req.body && req.body.contactId) || '').trim();
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
@@ -943,6 +983,8 @@ app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
       await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
                WHERE ghl_contact_id = $1`, [contactId]);
     }
+    // Espejo a Supabase: bot_active = !closed (OFF → false, ON → true).
+    await mirrorByGhl(contactId, !closed);
   }
 
   await logAction(req, closed ? 'conv_close' : 'conv_open', contactId,
@@ -1511,7 +1553,7 @@ async function scanHandoff() {
     const nuevos = await q(
       `UPDATE contacts SET handoff = true, handoff_at = now()
        WHERE ghl_contact_id = ANY($1::text[]) AND handoff IS NOT TRUE
-       RETURNING id, ghl_contact_id, name, phone`, [ids]);
+       RETURNING id, ghl_contact_id, name, phone, user_id`, [ids]);
     for (const c of nuevos.rows) {
       const cv = await q(`SELECT id FROM conversations WHERE contact_id = $1 LIMIT 1`, [c.id]);
       await notify({
@@ -1520,6 +1562,7 @@ async function scanHandoff() {
         body: 'Requiere atención humana — se apaga el bot para este contacto',
         refId: c.ghl_contact_id + ':' + Date.now()
       });
+      await mirrorBotActive({ phone: c.phone, userId: c.user_id, active: false });   // espejo → bot OFF
     }
     if (nuevos.rowCount) console.log('[handoff] nuevos:', nuevos.rowCount);
 
@@ -1561,7 +1604,7 @@ async function scanHandoffAutoReturn() {
     const mins = await getHandoffReturnMins();
     if (!mins) return;   // desactivado
     const vencidos = await q(
-      `SELECT ghl_contact_id, EXTRACT(EPOCH FROM (now() - handoff_at))::bigint AS secs
+      `SELECT ghl_contact_id, phone, user_id, EXTRACT(EPOCH FROM (now() - handoff_at))::bigint AS secs
          FROM contacts
         WHERE handoff = true AND handoff_at IS NOT NULL AND ghl_contact_id IS NOT NULL
           AND handoff_at < now() - make_interval(mins => $1::int)`, [mins]);
@@ -1572,6 +1615,7 @@ async function scanHandoffAutoReturn() {
         await quitarTagHandoff(c.ghl_contact_id).catch(e => console.error('auto-return quitarTag', e.message));
         await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
                  WHERE ghl_contact_id = $1`, [c.ghl_contact_id]);
+        await mirrorBotActive({ phone: c.phone, userId: c.user_id, active: true });   // espejo → bot ON
         await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
                  VALUES ('conv_open', 'Sistema (auto-return)', $1, $2)`,
           [c.ghl_contact_id, `Camila reactivada automáticamente tras ${mins} min en handoff`]);
