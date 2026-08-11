@@ -509,10 +509,16 @@ function normalize(body, file, direction) {
 
 const SAVE_SQL = `
 WITH existing AS (SELECT id FROM contacts
-  WHERE ($1::text  IS NOT NULL AND ghl_contact_id = $1::text)
-     OR ($27::text IS NOT NULL AND user_id       = $27::text)
-     OR ($9::text  IS NOT NULL AND phone          = $9::text)
-  ORDER BY CASE WHEN ghl_contact_id = $1::text THEN 0 WHEN user_id = $27::text THEN 1 ELSE 2 END LIMIT 1),
+  -- Match CRUZADO: cualquiera de los identificadores entrantes ($28 = [contactId,
+  -- user_id, phone]) contra cualquiera de las columnas. Meta a veces manda el
+  -- teléfono como contactId y otras el user_id: así igual encuentra al contacto y
+  -- no lo duplica. Para IG/FB/web (solo GHL id, sin phone/user_id) equivale a antes.
+  WHERE ghl_contact_id = ANY($28::text[])
+     OR user_id        = ANY($28::text[])
+     OR phone          = ANY($28::text[])
+  ORDER BY CASE WHEN ghl_contact_id = $1::text  THEN 0
+                WHEN user_id        = $27::text THEN 1
+                WHEN phone          = $9::text  THEN 2 ELSE 3 END, id LIMIT 1),
 upd AS (UPDATE contacts SET
     ghl_contact_id = COALESCE(contacts.ghl_contact_id, $1),
     user_id        = COALESCE(contacts.user_id, $27),
@@ -532,7 +538,10 @@ INSERT INTO messages (conversation_id, wamid, direction, type, text, status, cha
   ON CONFLICT (wamid) DO NOTHING RETURNING id, conversation_id;`;
 
 async function saveMessage(n) {
-  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null, n.messageHash ?? null, n.contextId ?? null, n.contextHash ?? null, n.sentAt ?? null, n.deviceId ?? null, n.userId ?? null];
+  // Claves de identidad para el match cruzado (distintas, sin vacíos).
+  const keys = [...new Set([n.contactId, n.userId, n.phone]
+    .filter(v => v != null && String(v).trim() !== '').map(v => String(v).trim()))];
+  const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null, n.messageHash ?? null, n.contextId ?? null, n.contextHash ?? null, n.sentAt ?? null, n.deviceId ?? null, n.userId ?? null, keys];
   const r = await q(SAVE_SQL, params);
   const row = r.rows[0] || {};
   return { id: row.id != null ? String(row.id) : null, conversationId: row.conversation_id != null ? String(row.conversation_id) : null };
