@@ -488,9 +488,15 @@ function normalize(body, file, direction) {
   const contextId = limpiaWamid(body.contextId);
   // Id de usuario de Meta (US.101…): identifica al contacto cuando NO viene teléfono.
   const rawUid = body.userId ?? body.user_id ?? body.from_user_id ?? body.fromUserId;
-  const userId = rawUid != null && String(rawUid).trim() !== '' ? String(rawUid).trim() : null;
+  let userId = rawUid != null && String(rawUid).trim() !== '' ? String(rawUid).trim() : null;
+  let contactId = body.contactId != null ? String(body.contactId).trim() : null;
+  // El id de Meta tiene formato XX.dígitos (CO.., DO.., US..). Si llega como contactId,
+  // es un user_id, NO un ghl_contact_id (esa columna guarda el id real de GHL). Guardarlo
+  // como user_id hace que se rellene esa columna y que los mensajes que llegan SOLO con el
+  // user_id (p.ej. las respuestas del bot, sin teléfono) encuentren al contacto → sin duplicar.
+  if (contactId && /^[A-Za-z]{2}\.\d+$/.test(contactId)) { userId = userId || contactId; contactId = null; }
   return {
-    contactId: body.contactId != null ? String(body.contactId) : null,
+    contactId: contactId || null,
     userId,
     name: body.name || null, text, wamid, ts, type,
     direction, status: body.status || (direction === 'in' ? 'received' : 'sent'),
