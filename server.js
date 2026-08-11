@@ -942,54 +942,57 @@ async function mirrorBotActive({ phone, userId, active }) {
 // Refleja por ghl_contact_id: busca phone/user_id del contacto y espeja.
 async function mirrorByGhl(ghlId, active) {
   try {
-    const cc = await q(`SELECT phone, user_id FROM contacts WHERE ghl_contact_id = $1 LIMIT 1`, [ghlId]);
-    if (cc.rows[0]) await mirrorBotActive({ phone: cc.rows[0].phone, userId: cc.rows[0].user_id, active });
+    const cc = await q(`SELECT phone, user_id, ghl_contact_id FROM contacts WHERE ghl_contact_id = $1 LIMIT 1`, [ghlId]);
+    const r = cc.rows[0]; if (!r) return;
+    // El user_id de Meta puede estar en user_id o en ghl_contact_id (formato XX.dígitos).
+    const userId = r.user_id || (/^[A-Za-z]{2}\.\d+$/.test(r.ghl_contact_id || '') ? r.ghl_contact_id : null);
+    await mirrorBotActive({ phone: r.phone, userId, active });
   } catch (e) { console.error('[mirror] byGhl', e.message); }
 }
 
-// Enciende / apaga a Camila PARA ESE CONTACTO (bot_status = '' | 'STOP' en GHL).
-// Apagar = handoff: el chat se marca en rojo y avisa. Encender lo limpia todo,
-// incluida la etiqueta handoff en GHL. Además espeja bot_active en Supabase.
+// Enciende / apaga a Camila PARA ESE CONTACTO. Apagar = handoff: el chat se marca
+// en rojo y avisa. La FUENTE DE VERDAD es el handoff local (Railway) + el espejo a
+// Supabase; GHL es best-effort (solo IG/FB/web viejos). Para WhatsApp el
+// ghl_contact_id no es un id real de GHL → esa llamada falla y NO debe bloquear.
 app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
   const contactId = String((req.body && req.body.contactId) || '').trim();
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
   if (!contactId) return res.json({ ok: false });
   const closed = String(value).toUpperCase() === 'STOP';   // closed = Camila OFF
 
-  const { json } = await ghl('/contacts/' + encodeURIComponent(contactId), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customFields: [{ id: BOT_STATUS_FIELD, value }] }) });
-  const ok = !!(json && json.contact && json.contact.id);
+  // ¿existe el contacto? (y su estado previo, para notificar solo en la transición)
+  const before = await q(`SELECT id, name, phone, handoff FROM contacts WHERE ghl_contact_id = $1 LIMIT 1`, [contactId]);
+  const c = before.rows[0];
+  if (!c) return res.json({ ok: false, error: 'Contacto no encontrado' });
 
-  if (ok) {
-    if (closed) {
-      // Camila OFF → marca handoff (rojo + notificación), venga del botón o de la etiqueta.
-      const upd = await q(
-        `UPDATE contacts SET handoff = true, handoff_stopped = true,
-                handoff_at = COALESCE(handoff_at, now())
-         WHERE ghl_contact_id = $1 AND handoff IS NOT TRUE
-         RETURNING id, name, phone`, [contactId]);
-      const c = upd.rows[0];
-      if (c) {
-        const cv = await q(`SELECT id FROM conversations WHERE contact_id = $1 LIMIT 1`, [c.id]);
-        await notify({
-          type: 'handoff', contactId, conversationId: cv.rows[0] ? cv.rows[0].id : null,
-          title: 'Camila OFF: ' + (c.name || c.phone || 'contacto'),
-          body: 'Conversación en manual — el bot no responderá',
-          refId: contactId + ':' + Date.now()
-        });
-      }
-    } else {
-      // Camila ON → fuera handoff: etiqueta en GHL incluida.
-      await quitarTagHandoff(contactId).catch(e => console.error('quitarTagHandoff', e.message));
-      await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
-               WHERE ghl_contact_id = $1`, [contactId]);
+  // GHL best-effort (custom field bot_status para los canales viejos). No bloquea.
+  try {
+    await ghl('/contacts/' + encodeURIComponent(contactId), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customFields: [{ id: BOT_STATUS_FIELD, value }] }) });
+  } catch (e) { console.error('ghl-set-field GHL', e.message); }
+
+  if (closed) {
+    await q(`UPDATE contacts SET handoff = true, handoff_stopped = true,
+                handoff_at = COALESCE(handoff_at, now()) WHERE ghl_contact_id = $1`, [contactId]);
+    if (!c.handoff) {   // notificar solo la primera vez
+      const cv = await q(`SELECT id FROM conversations WHERE contact_id = $1 LIMIT 1`, [c.id]);
+      await notify({
+        type: 'handoff', contactId, conversationId: cv.rows[0] ? cv.rows[0].id : null,
+        title: 'Camila OFF: ' + (c.name || c.phone || 'contacto'),
+        body: 'Conversación en manual — el bot no responderá',
+        refId: contactId + ':' + Date.now()
+      });
     }
-    // Espejo a Supabase: bot_active = !closed (OFF → false, ON → true).
-    await mirrorByGhl(contactId, !closed);
+  } else {
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
+             WHERE ghl_contact_id = $1`, [contactId]);
+    await quitarTagHandoff(contactId).catch(e => console.error('quitarTagHandoff', e.message));
   }
+  // Espejo a Supabase: bot_active = !closed (OFF → false, ON → true).
+  await mirrorByGhl(contactId, !closed);
 
   await logAction(req, closed ? 'conv_close' : 'conv_open', contactId,
     closed ? 'Apagó a Camila (conversación manual)' : 'Encendió a Camila (quitó el handoff)');
-  res.json({ ok, contactId: ok ? json.contact.id : null, handoff: ok ? closed : null });
+  res.json({ ok: true, contactId, handoff: closed });
 }));
 
 // Contactos con la etiqueta handoff. Sirve del cache en DB (lo mantiene scanHandoff);
