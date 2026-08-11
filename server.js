@@ -828,38 +828,33 @@ app.post('/api/handoff-config', need('inbox.camila'), wrap(async (req, res) => {
 }));
 
 // Estado combinado por contacto: ¿debe responder el bot a esta persona?
-// Junta el flag global, el handoff (tag en GHL), si su conversación está abierta
-// y si está dentro de la ventana de 24h de WhatsApp. `shouldReply` ya viene listo
-// para un IF en n8n.
+// Junta el flag global + el handoff LOCAL (Railway, la misma fuente que pinta el
+// inbox) + la ventana de 24h de WhatsApp. Ya NO consulta GHL. `shouldReply` viene
+// listo para un IF en n8n. El identificador (contactId/user_id/phone) se matchea
+// contra ghl_contact_id, user_id o phone (Meta manda unos con nº y otros con id).
 app.get('/api/bot-status', wrap(async (req, res) => {
-  const contactId = String(req.query.contactId || '').trim();
+  const id = String(req.query.contactId || req.query.user_id || req.query.userId || req.query.phone || '').trim();
   const botActive = await getFlag();
 
-  let handoff = false, conversationOpen = true, botStatus = '', lastInboundAt = null;
-  if (contactId) {
-    // ventana 24h de WhatsApp (desde el último entrante en la DB)
+  let handoff = false, conversationOpen = true, lastInboundAt = null, found = false;
+  if (id) {
     const r = await q(
-      `SELECT EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
-       FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
-       WHERE c.ghl_contact_id = $1 LIMIT 1`, [contactId]);
-    if (r.rows.length && r.rows[0].last_inbound != null) lastInboundAt = Number(r.rows[0].last_inbound);
-
-    // GHL: tags (handoff) + custom field bot_status (botón Abierta/Cerrada a mano).
-    // bot_status = 'STOP' => conversación cerrada (bot detenido); vacío => abierta.
-    try {
-      const { json } = await ghl('/contacts/' + encodeURIComponent(contactId));
-      const contact = (json && json.contact) || {};
-      const tags = contact.tags || [];
-      handoff = tags.map(t => String(t).toLowerCase()).includes(String(HANDOFF_TAG).toLowerCase());
-      const cf = (contact.customFields || []).find(f => f && f.id === BOT_STATUS_FIELD);
-      botStatus = cf && cf.value != null ? String(cf.value) : '';
-      conversationOpen = botStatus.toUpperCase() !== 'STOP';
-    } catch (_) { /* si GHL falla, no bloquea al bot */ }
+      `SELECT c.handoff, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
+       FROM contacts c
+       LEFT JOIN conversations conv ON conv.contact_id = c.id
+       WHERE c.ghl_contact_id = $1 OR c.user_id = $1 OR c.phone = $1
+       ORDER BY conv.last_inbound DESC NULLS LAST LIMIT 1`, [id]);
+    if (r.rows.length) {
+      found = true;
+      handoff = !!r.rows[0].handoff;
+      if (r.rows[0].last_inbound != null) lastInboundAt = Number(r.rows[0].last_inbound);
+    }
   }
 
+  conversationOpen = !handoff;   // handoff = conversación en manual (bot detenido)
   const withinWindow = lastInboundAt != null ? (Date.now() - lastInboundAt) < 24 * 3600 * 1000 : true;
-  const shouldReply = botActive && !handoff && conversationOpen;
-  res.json({ ok: true, contactId: contactId || null, botActive, handoff, conversationOpen, botStatus, lastInboundAt, withinWindow, shouldReply });
+  const shouldReply = botActive && !handoff;
+  res.json({ ok: true, contactId: id || null, found, botActive, handoff, conversationOpen, lastInboundAt, withinWindow, shouldReply });
 }));
 
 // ---- GHL ----
