@@ -111,12 +111,16 @@
     // ---------- lista de conversaciones ----------
     renderList() {
       const box = $('#convList');
-      const list = Store.visibleConversations();
+      const full = Store.visibleConversations();
       this.renderHandoffCount();          // siempre en sintonía con lo que hay en la lista
-      if (!list.length) {
+      if (!full.length) {
         box.innerHTML = '<div class="list__body-empty"><p style="padding:30px;text-align:center;color:#9aa3b2">Sin conversaciones</p></div>';
         return;
       }
+      // Paginación en cliente: solo se pintan las primeras N (fluidez). El resto vive
+      // en memoria (para orden/live update); se revelan con el botón o al scrollear.
+      const limit = Store.renderLimit || 25;
+      const list = full.slice(0, limit);
       const frag = document.createDocumentFragment();
       list.forEach(c => {
         const active = c.id === Store.activeId;
@@ -143,6 +147,14 @@
         node.addEventListener('click', () => global.App.openConversation(c.id));
         frag.appendChild(node);
       });
+      // Botón "cargar más" cuando hay más de las pintadas.
+      if (full.length > list.length) {
+        const restantes = full.length - list.length;
+        const more = el('button', 'conv-more');
+        more.textContent = `Cargar más chats (${restantes})`;
+        more.addEventListener('click', () => { Store.renderLimit = (Store.renderLimit || 25) + 25; UI.renderList(); });
+        frag.appendChild(more);
+      }
       box.replaceChildren(frag);
     },
 

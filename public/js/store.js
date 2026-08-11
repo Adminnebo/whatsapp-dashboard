@@ -51,6 +51,7 @@
     activeId: null,
     filter: 'all',       // all | unread | handoff | whatsapp | instagram | facebook | pagina_web
     search: '',
+    renderLimit: 25,     // cuántas conversaciones se pintan en la lista (paginación cliente)
 
     // --- mutadores ---
     setData(conversations, messagesByConv, templates) {

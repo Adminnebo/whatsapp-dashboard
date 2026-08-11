@@ -231,6 +231,14 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 }
 .conv--unread .conv__name { font-weight: 700; }
 .conv--unread .conv__preview { color: var(--text); font-weight: 500; }
+/* botón "cargar más chats" (paginación de la lista) */
+.conv-more {
+  display: block; width: calc(100% - 24px); margin: 8px 12px 14px;
+  padding: 9px 12px; border: 1px solid var(--border, #2a3040); border-radius: 8px;
+  background: transparent; color: var(--text-soft); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background .15s, color .15s;
+}
+.conv-more:hover { background: var(--hover, rgba(255,255,255,.05)); color: var(--text); }
 /* handoff — se fija arriba y se pinta en rojo (requiere atención humana) */
 .conv__bottom .conv__preview { flex: 1; min-width: 0; }
 .conv__handoff {

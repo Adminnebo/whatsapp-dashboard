@@ -569,16 +569,25 @@
 
     // ---------- eventos ----------
     bindEvents() {
-      // búsqueda
-      $('#searchInput').addEventListener('input', e => { Store.search = e.target.value; UI.renderList(); });
+      // búsqueda (al filtrar, volvemos a empezar por las primeras 25)
+      $('#searchInput').addEventListener('input', e => { Store.search = e.target.value; Store.renderLimit = 25; UI.renderList(); });
       // tabs
       document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(x => x.classList.remove('tab--active'));
         t.classList.add('tab--active');
         Store.filter = t.dataset.filter;
+        Store.renderLimit = 25;                 // reset de la paginación al cambiar de filtro
         UI.renderList();
         if (Store.filter === 'handoff') this.loadHandoff(true); // refresca al entrar
       }));
+      // auto-cargar más al llegar cerca del fondo de la lista (además del botón)
+      const convBox = $('#convList');
+      if (convBox) convBox.addEventListener('scroll', () => {
+        if (convBox.scrollTop + convBox.clientHeight >= convBox.scrollHeight - 120) {
+          const total = Store.visibleConversations().length;
+          if ((Store.renderLimit || 25) < total) { Store.renderLimit = (Store.renderLimit || 25) + 25; UI.renderList(); }
+        }
+      });
       // composer: autoexpandir
       const input = $('#msgInput');
       input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; });
