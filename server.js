@@ -553,6 +553,74 @@ async function saveMessage(n) {
   return { id: row.id != null ? String(row.id) : null, conversationId: row.conversation_id != null ? String(row.conversation_id) : null };
 }
 
+// ── Auto-fusión de duplicados ────────────────────────────────────────────────
+// El primer mensaje de una identidad a veces trae SOLO un identificador (p.ej. la
+// respuesta del bot con user_id y sin teléfono) mientras el contacto viejo tiene
+// el OTRO (teléfono sin user_id): no hay clave compartida → se crea un duplicado.
+// Cuando más tarde aparece el identificador que faltaba, aquí lo detectamos y
+// fundimos los dos contactos en el que tenga más mensajes. Best-effort, sin bloquear.
+async function mergeTwoContacts(id1, id2) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['merge:' + Math.min(Number(id1), Number(id2))]);
+    const g = (await client.query(
+      `SELECT c.id, c.ghl_contact_id, c.phone, c.user_id, c.name, c.handoff, c.handoff_stopped, c.handoff_at,
+              (SELECT id FROM conversations WHERE contact_id=c.id) AS conv,
+              (SELECT count(*)::int FROM messages m JOIN conversations cv ON cv.id=m.conversation_id WHERE cv.contact_id=c.id) AS msgs
+       FROM contacts c WHERE c.id = ANY($1::bigint[])`, [[id1, id2]])).rows;
+    if (g.length < 2) { await client.query('ROLLBACK'); return; }
+    g.sort((a, b) => b.msgs - a.msgs || Number(a.id) - Number(b.id));
+    const keep = g[0], drop = g[1];
+    let keepConv = keep.conv;
+    if (keep.conv && drop.conv) {
+      await client.query(`UPDATE messages SET conversation_id=$1 WHERE conversation_id=$2`, [keep.conv, drop.conv]);
+      // drop.conv queda vacía; el DELETE del contacto la borra por cascade
+    } else if (!keep.conv && drop.conv) {
+      await client.query(`UPDATE conversations SET contact_id=$1 WHERE id=$2`, [keep.id, drop.conv]);
+      keepConv = drop.conv;
+    }
+    await client.query(`DELETE FROM contacts WHERE id=$1`, [drop.id]);   // cascade: solo la conv vacía si quedó
+    await client.query(
+      `UPDATE contacts SET
+         ghl_contact_id = COALESCE(ghl_contact_id, $2), phone = COALESCE(phone, $3),
+         user_id = COALESCE(user_id, $4), name = COALESCE(name, $5),
+         handoff = handoff OR $6, handoff_stopped = handoff_stopped OR $7,
+         handoff_at = COALESCE(handoff_at, $8), updated_at = now()
+       WHERE id=$1`, [keep.id, drop.ghl_contact_id, drop.phone, drop.user_id, drop.name, !!drop.handoff, !!drop.handoff_stopped, drop.handoff_at]);
+    if (keepConv) {
+      await client.query(
+        `WITH last AS (SELECT text, COALESCE(sent_at,created_at) ts, direction, status FROM messages WHERE conversation_id=$1 ORDER BY COALESCE(sent_at,created_at) DESC NULLS LAST, id DESC LIMIT 1),
+              li AS (SELECT max(COALESCE(sent_at,created_at)) mi FROM messages WHERE conversation_id=$1 AND direction='in')
+         UPDATE conversations SET last_message=(SELECT text FROM last), last_message_at=(SELECT ts FROM last),
+           last_direction=(SELECT direction FROM last), last_status=(SELECT status FROM last),
+           last_inbound=(SELECT mi FROM li), updated_at=now() WHERE id=$1`, [keepConv]);
+    }
+    await client.query('COMMIT');
+    console.log('[dedupe] fusionados', drop.id, '→', keep.id);
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[dedupe] merge', e.message);
+  } finally { client.release(); }
+}
+
+// Tras guardar un mensaje: ¿el contacto de esta conversación comparte algún
+// identificador (phone/user_id/ghl_contact_id, en cualquier columna) con otro? Si
+// sí, los fusiona. Cubre el caso de duplicados por orden de llegada de identificadores.
+async function dedupeByConversation(convId) {
+  if (!convId) return;
+  const r = await q(
+    `SELECT c.id AS cid, o.id AS oid
+     FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
+     JOIN contacts o ON o.id <> c.id AND (
+        (c.phone          IS NOT NULL AND (o.phone = c.phone OR o.ghl_contact_id = c.phone OR o.user_id = c.phone)) OR
+        (c.user_id        IS NOT NULL AND (o.user_id = c.user_id OR o.phone = c.user_id OR o.ghl_contact_id = c.user_id)) OR
+        (c.ghl_contact_id IS NOT NULL AND (o.ghl_contact_id = c.ghl_contact_id OR o.phone = c.ghl_contact_id OR o.user_id = c.ghl_contact_id))
+     )
+     WHERE cv.id = $1::bigint LIMIT 1`, [convId]);
+  if (r.rows[0]) await mergeTwoContacts(r.rows[0].cid, r.rows[0].oid);
+}
+
 // ==================== RUTAS API ====================
 
 app.get('/api/db-setup', wrap(async (_req, res) => { await migrate(); res.json({ ok: true, message: 'Tablas creadas correctamente.' }); }));
@@ -681,19 +749,26 @@ app.post('/api/save-in', upload.single('file'), wrap(async (req, res) => {
   const saved = await saveMessage(n);
   res.json({ ok: true, ...saved });
   // Si nadie automático va a contestar (handoff o bot apagado), avisamos en la app.
+  // Resolvemos el contacto por la conversación (el id puede estar en cualquier columna).
   try {
-    if (!n.contactId) return;
-    const c = await q(`SELECT name, phone, handoff FROM contacts WHERE ghl_contact_id = $1 LIMIT 1`, [n.contactId]);
-    const row = c.rows[0]; if (!row) return;
-    const botOn = await getFlag();
-    if (!row.handoff && botOn) return;
-    await notify({
-      type: 'inbound', contactId: n.contactId, conversationId: saved.conversationId,
-      title: 'Mensaje de ' + (row.name || row.phone || 'contacto'),
-      body: (n.text || '[adjunto]').slice(0, 120) + (row.handoff ? ' — en handoff' : ' — bot apagado'),
-      refId: n.wamid || String(saved.id)
-    });
+    if (saved.conversationId) {
+      const c = await q(`SELECT c.ghl_contact_id, c.name, c.phone, c.handoff
+                         FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
+                         WHERE cv.id = $1::bigint LIMIT 1`, [saved.conversationId]);
+      const row = c.rows[0];
+      const botOn = await getFlag();
+      if (row && (row.handoff || !botOn)) {
+        await notify({
+          type: 'inbound', contactId: row.ghl_contact_id, conversationId: saved.conversationId,
+          title: 'Mensaje de ' + (row.name || row.phone || 'contacto'),
+          body: (n.text || '[adjunto]').slice(0, 120) + (row.handoff ? ' — en handoff' : ' — bot apagado'),
+          refId: n.wamid || String(saved.id)
+        });
+      }
+    }
   } catch (e) { console.error('save-in notify', e.message); }
+  // Auto-fusión anti-duplicados (best-effort, al final para no afectar la respuesta).
+  dedupeByConversation(saved.conversationId).catch(e => console.error('dedupe save-in', e.message));
 }));
 app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
   const n = normalize(req.body || {}, req.file, 'out');
@@ -701,7 +776,11 @@ app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
   // Cobrado real por modelo (si ya viene el coste). Si no, queda la tarifa fija y
   // /api/message-cost lo recalcula cuando llegue el coste.
   n.chargedUsd = await chargedFor(n.sentBy, n.model, n.costUsd);
-  res.json({ ok: true, ...(await saveMessage(n)) });
+  const saved = await saveMessage(n);
+  res.json({ ok: true, ...saved });
+  // Auto-fusión anti-duplicados: la respuesta del bot suele traer solo el user_id,
+  // que es justo el caso que creaba duplicados.
+  dedupeByConversation(saved.conversationId).catch(e => console.error('dedupe save-out', e.message));
 }));
 
 // Actualiza modelo/coste/tiempo de un mensaje YA guardado, por wamid. Lo usa el
