@@ -136,7 +136,7 @@ app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 // (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
 // (/tickets/file igual: la abre el gestor de tareas desde fuera, con la firma en la URL)
-const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/ghl/contact', '/contact']);
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/ghl/contact', '/contact', '/handoff-set']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
@@ -1002,6 +1002,65 @@ app.get('/api/handoff', wrap(async (req, res) => {
                      JOIN conversations cv ON cv.contact_id = c.id
                      WHERE c.handoff = true AND c.ghl_contact_id IS NOT NULL`);
   res.json({ ok: true, contactIds: r.rows.map(x => x.ghl_contact_id) });
+}));
+
+// Handoff desde el AGENTE (máquina, sin sesión: lo llama el bot/n8n). Marca la
+// atención humana en Railway (rojo + notificación) y espeja bot_active a Supabase,
+// para que TANTO la interfaz COMO el propio bot ("Active Bot?") queden en sync.
+// Resuelve el contacto por conversationId, user_id o phone. active=false (o ausente)
+// = activar handoff (el bot deja de responder); active=true = liberar (bot ON).
+app.post('/api/handoff-set', wrap(async (req, res) => {
+  const b = req.body || {};
+  const active = asBool(b.active);            // true = reactivar bot; ausente/false = handoff ON
+  const convId = String(b.conversationId || b.conversation_id || '').replace(/[^0-9]/g, '');
+  const rawUid = b.userId || b.user_id || b.from_user_id;
+  const userId = rawUid != null && String(rawUid).trim() !== '' ? String(rawUid).trim() : null;
+  const phone  = (b.phone || b.number) ? (String(b.phone || b.number).replace(/[^\d]/g, '') || null) : null;
+  if (!convId && !userId && !phone) return res.status(400).json({ error: 'Falta conversationId, user_id o phone' });
+
+  // Resolver el contacto + su conversación más reciente.
+  let row;
+  if (convId) {
+    const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id, cv.id AS conv_id
+                       FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
+                       WHERE cv.id = $1::bigint LIMIT 1`, [convId]);
+    row = r.rows[0];
+  } else {
+    const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id,
+                         (SELECT id FROM conversations WHERE contact_id = c.id ORDER BY updated_at DESC LIMIT 1) AS conv_id
+                       FROM contacts c
+                       WHERE ($1::text IS NOT NULL AND c.user_id = $1::text)
+                          OR ($2::text IS NOT NULL AND c.phone   = $2::text)
+                       ORDER BY CASE WHEN c.user_id = $1::text THEN 0 ELSE 1 END LIMIT 1`, [userId, phone]);
+    row = r.rows[0];
+  }
+  if (!row) return res.status(404).json({ error: 'Contacto no encontrado' });
+
+  if (!active) {
+    await q(`UPDATE contacts SET handoff = true, handoff_stopped = true,
+                handoff_at = COALESCE(handoff_at, now()) WHERE id = $1`, [row.id]);
+    await notify({
+      type: 'handoff', contactId: row.ghl_contact_id, conversationId: row.conv_id,
+      title: 'Handoff: ' + (row.name || row.phone || 'contacto'),
+      body: b.reason ? String(b.reason).slice(0, 120) : 'El bot derivó la conversación a un humano',
+      refId: 'agent:' + row.id + ':' + Date.now()
+    });
+    await mirrorBotActive({ phone: row.phone, userId: row.user_id, active: false });
+  } else {
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [row.id]);
+    await mirrorBotActive({ phone: row.phone, userId: row.user_id, active: true });
+  }
+  await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
+           VALUES ($1, 'Agente (bot)', $2, $3)`,
+    [active ? 'conv_open' : 'conv_close', row.ghl_contact_id,
+     active ? 'Bot reactivado por el agente'
+            : 'Handoff activado por el agente' + (b.reason ? ': ' + String(b.reason).slice(0, 140) : '')]);
+
+  res.json({
+    ok: true, handoff: !active, contactId: String(row.id),
+    conversationId: row.conv_id ? String(row.conv_id) : null,
+    name: row.name, phone: row.phone, userId: row.user_id
+  });
 }));
 
 // ---- notificaciones ----
