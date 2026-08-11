@@ -1059,44 +1059,53 @@ async function mirrorByGhl(ghlId, active) {
 // Supabase; GHL es best-effort (solo IG/FB/web viejos). Para WhatsApp el
 // ghl_contact_id no es un id real de GHL → esa llamada falla y NO debe bloquear.
 app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
-  const contactId = String((req.body && req.body.contactId) || '').trim();
+  const contactId = String((req.body && req.body.contactId) || '').trim();   // ghl_contact_id (puede faltar)
+  const convId = String((req.body && (req.body.conversationId || req.body.conversation_id)) || '').replace(/[^0-9]/g, '');
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
-  if (!contactId) return res.json({ ok: false });
+  if (!contactId && !convId) return res.json({ ok: false });
   const closed = String(value).toUpperCase() === 'STOP';   // closed = Camila OFF
 
-  // ¿existe el contacto? (y su estado previo, para notificar solo en la transición)
-  const before = await q(`SELECT id, name, phone, handoff FROM contacts WHERE ghl_contact_id = $1 LIMIT 1`, [contactId]);
+  // Resolver el contacto por ghl_contact_id O por la conversación (los contactos
+  // 100% Meta no tienen ghl_contact_id → hay que ubicarlos por conversationId).
+  const before = await q(
+    `SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id, c.handoff,
+            (SELECT id FROM conversations WHERE contact_id = c.id ORDER BY updated_at DESC LIMIT 1) AS conv_id
+     FROM contacts c
+     WHERE ($1::text IS NOT NULL AND c.ghl_contact_id = $1::text)
+        OR ($2::text IS NOT NULL AND c.id = (SELECT contact_id FROM conversations WHERE id = $2::bigint))
+     LIMIT 1`, [contactId || null, convId || null]);
   const c = before.rows[0];
   if (!c) return res.json({ ok: false, error: 'Contacto no encontrado' });
 
-  // GHL best-effort (custom field bot_status para los canales viejos). No bloquea.
-  try {
-    await ghl('/contacts/' + encodeURIComponent(contactId), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customFields: [{ id: BOT_STATUS_FIELD, value }] }) });
-  } catch (e) { console.error('ghl-set-field GHL', e.message); }
+  // GHL best-effort SOLO si el contacto tiene un ghl_contact_id real (IG/FB/web).
+  if (c.ghl_contact_id) {
+    try {
+      await ghl('/contacts/' + encodeURIComponent(c.ghl_contact_id), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ customFields: [{ id: BOT_STATUS_FIELD, value }] }) });
+    } catch (e) { console.error('ghl-set-field GHL', e.message); }
+  }
 
   if (closed) {
     await q(`UPDATE contacts SET handoff = true, handoff_stopped = true,
-                handoff_at = COALESCE(handoff_at, now()) WHERE ghl_contact_id = $1`, [contactId]);
+                handoff_at = COALESCE(handoff_at, now()) WHERE id = $1`, [c.id]);
     if (!c.handoff) {   // notificar solo la primera vez
-      const cv = await q(`SELECT id FROM conversations WHERE contact_id = $1 LIMIT 1`, [c.id]);
       await notify({
-        type: 'handoff', contactId, conversationId: cv.rows[0] ? cv.rows[0].id : null,
+        type: 'handoff', contactId: c.ghl_contact_id, conversationId: c.conv_id,
         title: 'Camila OFF: ' + (c.name || c.phone || 'contacto'),
         body: 'Conversación en manual — el bot no responderá',
-        refId: contactId + ':' + Date.now()
+        refId: 'off:' + c.id + ':' + Date.now()
       });
     }
   } else {
-    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
-             WHERE ghl_contact_id = $1`, [contactId]);
-    await quitarTagHandoff(contactId).catch(e => console.error('quitarTagHandoff', e.message));
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [c.id]);
+    if (c.ghl_contact_id) await quitarTagHandoff(c.ghl_contact_id).catch(e => console.error('quitarTagHandoff', e.message));
   }
-  // Espejo a Supabase: bot_active = !closed (OFF → false, ON → true).
-  await mirrorByGhl(contactId, !closed);
+  // Espejo a Supabase: el user_id de Meta puede estar en user_id o en ghl_contact_id.
+  const uid = c.user_id || (/^[A-Za-z]{2}\.\d+$/.test(c.ghl_contact_id || '') ? c.ghl_contact_id : null);
+  await mirrorBotActive({ phone: c.phone, userId: uid, active: !closed });
 
-  await logAction(req, closed ? 'conv_close' : 'conv_open', contactId,
+  await logAction(req, closed ? 'conv_close' : 'conv_open', c.ghl_contact_id || String(c.id),
     closed ? 'Apagó a Camila (conversación manual)' : 'Encendió a Camila (quitó el handoff)');
-  res.json({ ok: true, contactId, handoff: closed });
+  res.json({ ok: true, contactId: c.ghl_contact_id, conversationId: c.conv_id ? String(c.conv_id) : null, handoff: closed });
 }));
 
 // Contactos con la etiqueta handoff. Sirve del cache en DB (lo mantiene scanHandoff);

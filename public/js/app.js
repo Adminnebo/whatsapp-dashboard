@@ -241,10 +241,12 @@
       UI.renderDetails(c);
       UI.renderList();
       UI.renderThread();
-      if (!c.contactId || !Store.settings.ghlFieldUrl) return;
+      if (!Store.settings.ghlFieldUrl) return;
       const value = closed ? 'STOP' : '';
       try {
-        await Api.setGhlField(c.contactId, value);
+        // Mandamos también el conversationId: si el contacto no tiene ghl_contact_id
+        // (contacto Meta), el servidor lo resuelve igual por la conversación.
+        await Api.setGhlField(c.contactId, value, c.id);
         // refleja en la caché para que un re-render no lo revierta
         const entry = Store.ghlByContact[c.contactId];
         if (entry && entry.contact) {
