@@ -648,16 +648,18 @@ app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res)
   if (todos) filtro = '';
   else if (device) { params.push(device); filtro = 'WHERE conv.device_id = $1'; }
 
-  const r = await q(`SELECT conv.id, c.ghl_contact_id, c.name, c.phone, c.email, c.company, c.tags, c.source, c.owner, c.handoff,
+  const r = await q(`SELECT conv.id, c.ghl_contact_id, c.user_id, c.name, c.phone, c.email, c.company, c.tags, c.source, c.owner, c.handoff,
       conv.channel, conv.status, conv.starred, conv.unread_count, conv.last_message, conv.last_direction, conv.last_status, conv.device_id,
       EXTRACT(EPOCH FROM conv.last_message_at)*1000 AS last_message_at, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
       FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
       ${filtro}
       ORDER BY conv.last_message_at DESC NULLS LAST`, params);
   const conversations = r.rows.map(row => {
-    const nm = row.name || row.phone || '?';
+    // Fallback de display: nombre → teléfono → user_id de Meta (contactos "username"
+    // sin teléfono) → '?'. Así un contacto por username no se ve como "?".
+    const nm = row.name || row.phone || row.user_id || '?';
     return {
-      id: String(row.id), contactId: row.ghl_contact_id || null, name: nm, phone: row.phone,
+      id: String(row.id), contactId: row.ghl_contact_id || null, userId: row.user_id || null, name: nm, phone: row.phone,
       avatar: { initials: initials(nm), color: colorFor(nm) }, channel: row.channel || 'whatsapp',
       lastMessage: row.last_message || '', lastMessageAt: Number(row.last_message_at) || 0,
       lastDirection: row.last_direction || 'in', lastStatus: row.last_status || 'received',

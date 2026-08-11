@@ -169,7 +169,7 @@
       $('#threadAvatar').textContent = conv.avatar.initials;
       $('#threadAvatar').style.background = conv.avatar.color;
       $('#threadName').textContent = conv.name;
-      $('#threadPhone').textContent = conv.phone || (conv.contactId ? 'ID ' + conv.contactId : '');
+      $('#threadPhone').textContent = conv.phone || conv.userId || (conv.contactId ? 'ID ' + conv.contactId : '');
       const hcm = chMeta(conv.channel);
       const chanEl = $('#threadChan');
       if (chanEl) { chanEl.innerHTML = hcm.icon + ' ' + hcm.label; chanEl.style.color = hcm.color; }
