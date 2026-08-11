@@ -107,9 +107,10 @@
       if (!(Store.messagesByConv[id] || []).length) {
         UI.showThreadLoading(true);
         try {
-          const msgs = await Api.loadMessages(id);
+          const { messages, hasMore } = await Api.loadMessages(id, { limit: 50 });   // solo los últimos 50 → abre al instante
           if (Store.activeId !== id) return;        // el usuario ya se fue a otro chat
-          Store.messagesByConv[id] = msgs;
+          Store.messagesByConv[id] = messages;
+          Store.hasMoreByConv[id] = hasMore;
           UI.renderThread();
         } catch (e) {
           if (Store.activeId === id) UI.toast('No se pudieron cargar los mensajes');
@@ -117,6 +118,42 @@
           if (Store.activeId === id) UI.showThreadLoading(false);
         }
       }
+    },
+
+    // Carga los mensajes ANTERIORES (scroll hacia arriba). Antepone respetando el orden
+    // y mantiene la posición de lectura (el chat no salta).
+    async loadOlderMessages() {
+      const id = Store.activeId;
+      if (!id || this._loadingOlder || !Store.hasMoreByConv[id]) return;
+      const msgs = Store.messagesByConv[id] || [];
+      if (!msgs.length) return;
+      this._loadingOlder = true;
+      const box = document.getElementById('messages');
+      const prevH = box ? box.scrollHeight : 0, prevTop = box ? box.scrollTop : 0;
+      try {
+        const { messages, hasMore } = await Api.loadMessages(id, { before: msgs[0].id, limit: 50 });
+        if (Store.activeId !== id) return;
+        if (messages.length) {
+          const vistos = new Set(msgs.map(m => m.id));
+          const nuevos = messages.filter(m => !vistos.has(m.id));
+          Store.messagesByConv[id] = nuevos.concat(Store.messagesByConv[id] || []);
+        }
+        Store.hasMoreByConv[id] = hasMore;
+        UI.renderThread();
+        if (box) box.scrollTop = box.scrollHeight - prevH + prevTop;   // ancla la vista
+      } catch (_) {
+      } finally { this._loadingOlder = false; }
+    },
+
+    // Recarga los mensajes del chat activo conservando los ya cargados (para el poll
+    // y tras enviar): trae los últimos y los funde con lo que hubiera arriba.
+    async reloadActive() {
+      const id = Store.activeId; if (!id) return;
+      const cur = Store.messagesByConv[id] || [];
+      const { messages } = await Api.loadMessages(id, { limit: Math.max(50, cur.length) });
+      const map = new Map(cur.map(m => [m.id, m]));
+      for (const m of messages) map.set(m.id, m);
+      Store.messagesByConv[id] = [...map.values()].sort((a, b) => (a.timestamp - b.timestamp) || (Number(a.id) - Number(b.id)));
     },
 
     // ¿el texto parece un nombre real? (tiene al menos una letra)
@@ -481,7 +518,7 @@
         await Api.sendTemplate(payload);
         $('#templateModal').hidden = true;
         UI.toast('Plantilla enviada');
-        Store.messagesByConv[Store.activeId] = await Api.loadMessages(Store.activeId);
+        await this.reloadActive();
         UI.renderThread();
         this.refreshData();
       } catch (e) {
@@ -531,7 +568,7 @@
           const statusChanged = active.lastStatus !== this._activeStatus;
           if (hasNew || statusChanged) {
             try {
-              Store.messagesByConv[Store.activeId] = await Api.loadMessages(Store.activeId);
+              await this.reloadActive();
               this._activeStatus = active.lastStatus;
               UI.renderThread();
             } catch (_) {}
@@ -587,6 +624,11 @@
           const total = Store.visibleConversations().length;
           if ((Store.renderLimit || 25) < total) { Store.renderLimit = (Store.renderLimit || 25) + 25; UI.renderList(); }
         }
+      });
+      // cargar mensajes anteriores al llegar arriba del hilo
+      const msgBox = $('#messages');
+      if (msgBox) msgBox.addEventListener('scroll', () => {
+        if (msgBox.scrollTop <= 60) this.loadOlderMessages();
       });
       // composer: autoexpandir
       const input = $('#msgInput');

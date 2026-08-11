@@ -586,22 +586,37 @@ app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res)
 
 app.get('/api/messages', need('inbox.conversations'), wrap(async (req, res) => {
   const id = String(req.query.conversationId || '');
-  if (!id) return res.json({ messages: [] });
-  // El UPDATE solo si de verdad hay no leídos: así abrir un chat ya leído no escribe
-  // (ni espera bloqueos) en cada carga.
+  if (!id) return res.json({ messages: [], hasMore: false });
+  // Paginación: se cargan los ÚLTIMOS `limit` mensajes al abrir; con `before`=<id del
+  // más antiguo ya cargado> se traen los `limit` anteriores (scroll hacia arriba).
+  const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 50));
+  const before = String(req.query.before || '').replace(/[^0-9]/g, '') || null;
+  // El UPDATE de leído SOLO en la carga inicial (sin cursor): abrir un chat ya leído no
+  // escribe, y "cargar anteriores" nunca toca el unread.
   // Cita (reply): por cada mensaje con context_hash, se busca el mensaje citado dentro
   // de la MISMA conversación cuyo message_hash coincide (match por hash estable, nunca por
   // id crudo — ver wahash.js). Si no resuelve, qt.* queda NULL y se renderiza sin cita.
   // Orden: coalesce(sent_at, created_at) — degrada a created_at si el payload no trajo
   // sent_at — con desempate created_at, id (Meta da segundos: dos entrantes empatan).
-  const r = await q(`WITH upd AS (UPDATE conversations SET unread_count=0 WHERE id=$1::bigint AND unread_count > 0 RETURNING id)
+  const r = await q(`
+    WITH upd AS (UPDATE conversations SET unread_count=0
+                 WHERE id=$1::bigint AND unread_count > 0 AND $3::bigint IS NULL RETURNING id),
+    page AS (
+      SELECT m.* FROM messages m
+      WHERE m.conversation_id=$1::bigint
+        AND ($3::bigint IS NULL OR
+             (COALESCE(m.sent_at, m.created_at), m.id) <
+             (SELECT COALESCE(sent_at, created_at), id FROM messages WHERE id=$3::bigint))
+      ORDER BY COALESCE(m.sent_at, m.created_at) DESC, m.created_at DESC, m.id DESC
+      LIMIT $2::int
+    )
     SELECT m.id, m.conversation_id, m.direction, m.type, m.text, m.template, m.media_url, m.media_mime, m.media_filename,
       (m.media_data IS NOT NULL) AS has_blob, m.status, m.channel, m.sent_by, m.context_id,
       EXTRACT(EPOCH FROM COALESCE(m.sent_at, m.created_at))*1000 AS timestamp,
       qt.id AS q_id, qt.direction AS q_direction, qt.type AS q_type, qt.text AS q_text,
       qt.media_mime AS q_media_mime, qt.media_filename AS q_media_filename,
       (qt.media_data IS NOT NULL) AS q_has_blob, qt.media_url AS q_media_url, qt.sent_by AS q_sent_by
-    FROM messages m
+    FROM page m
     LEFT JOIN LATERAL (
       SELECT c.id, c.direction, c.type, c.text, c.media_mime, c.media_filename, c.media_data, c.media_url, c.sent_by
       FROM messages c
@@ -609,8 +624,7 @@ app.get('/api/messages', need('inbox.conversations'), wrap(async (req, res) => {
         AND c.conversation_id = m.conversation_id AND c.id <> m.id
       ORDER BY c.created_at DESC LIMIT 1
     ) qt ON true
-    WHERE m.conversation_id=$1::bigint
-    ORDER BY COALESCE(m.sent_at, m.created_at) ASC, m.created_at ASC, m.id ASC`, [id]);
+    ORDER BY COALESCE(m.sent_at, m.created_at) ASC, m.created_at ASC, m.id ASC`, [id, limit, before]);
   const messages = r.rows.map(m => {
     let mediaUrl = m.media_url || null;
     if (!mediaUrl && m.has_blob) mediaUrl = mediaUrlFor(req, m.id);
@@ -634,7 +648,8 @@ app.get('/api/messages', need('inbox.conversations'), wrap(async (req, res) => {
       quoted, quotedMissing: !!m.context_id && m.q_id == null
     };
   });
-  res.json({ messages });
+  // hasMore: si llenó el page, probablemente hay más antiguos hacia arriba.
+  res.json({ messages, hasMore: r.rows.length === limit });
 }));
 
 app.get('/api/media', wrap(async (req, res) => {

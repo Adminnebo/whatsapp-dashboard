@@ -43,6 +43,7 @@
     settings: loadSettings(),
     conversations: [],
     messagesByConv: {},
+    hasMoreByConv: {},   // convId -> ¿quedan mensajes más antiguos por cargar hacia arriba?
     ghlByContact: {},     // cache de datos completos de GHL por contactId (sesión)
     nameByContact: {},    // cache de nombre GHL por contactId (liviano)
     handoffIds: new Set(),// contactIds con etiqueta handoff (GHL)

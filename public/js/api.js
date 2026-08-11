@@ -63,10 +63,15 @@
     // ---------------------------------------------------------------
     // Mensajes de una conversación (lazy load)
     // ---------------------------------------------------------------
-    async loadMessages(conversationId) {
-      const url = S().msgUrl + (S().msgUrl.includes('?') ? '&' : '?') + 'conversationId=' + encodeURIComponent(conversationId);
+    // opts: { before?: id (trae los anteriores a ese mensaje), limit?: n }
+    // Devuelve { messages, hasMore }.
+    async loadMessages(conversationId, opts = {}) {
+      let url = S().msgUrl + (S().msgUrl.includes('?') ? '&' : '?') + 'conversationId=' + encodeURIComponent(conversationId);
+      if (opts.before) url += '&before=' + encodeURIComponent(opts.before);
+      if (opts.limit) url += '&limit=' + encodeURIComponent(opts.limit);
       const data = await http(url, { method: 'GET', headers: headers() });
-      return data.messages || data || [];
+      const messages = (data && data.messages) || (Array.isArray(data) ? data : []) || [];
+      return { messages, hasMore: !!(data && data.hasMore) };
     },
 
     // ---------------------------------------------------------------
