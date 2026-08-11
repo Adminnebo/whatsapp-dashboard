@@ -436,7 +436,7 @@ function normalize(body, file, direction) {
   let ts = body.timestamp;
   if (ts == null || ts === '') ts = Math.floor(Date.now() / 1000);
   else { ts = Number(ts); if (ts > 1e12) ts = Math.floor(ts / 1000); }
-  const phone = body.phone ? String(body.phone).replace(/[^\d]/g, '') : null;
+  let phone = body.phone ? String(body.phone).replace(/[^\d]/g, '') : null;
   let chRaw = String(body.channel || '').trim().toLowerCase();
   chRaw = CH_ALIAS[chRaw] || chRaw;
   const ch = CHANNELS_OK.includes(chRaw) ? chRaw : 'whatsapp';
@@ -495,6 +495,18 @@ function normalize(body, file, direction) {
   // como user_id hace que se rellene esa columna y que los mensajes que llegan SOLO con el
   // user_id (p.ej. las respuestas del bot, sin teléfono) encuentren al contacto → sin duplicar.
   if (contactId && /^[A-Za-z]{2}\.\d+$/.test(contactId)) { userId = userId || contactId; contactId = null; }
+  // Rescate del destinatario desde el wamid: los envíos MANUALES (agente/CRM) a veces
+  // llaman sin teléfono ni id. El wamid de Meta lleva codificado el destinatario
+  // (teléfono, o user_id XX.dígitos) → lo recuperamos para pegar el mensaje al contacto
+  // real en vez de crear un contacto vacío "?".
+  if (!phone && !userId && !contactId && wamid) {
+    try {
+      const dec = Buffer.from(String(wamid).replace(/^wamid\./, ''), 'base64').toString('latin1');
+      const mMeta = dec.match(/[A-Z]{2}\.\d{6,}/);
+      if (mMeta) userId = mMeta[0];
+      else { const mPhone = dec.match(/\d{10,15}/); if (mPhone) phone = mPhone[0]; }
+    } catch (_) {}
+  }
   return {
     contactId: contactId || null,
     userId,
