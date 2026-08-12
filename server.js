@@ -373,6 +373,9 @@ CREATE TABLE IF NOT EXISTS tickets (
 );
 CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tickets_ext ON tickets(external_id);
+-- Conversación afectada por el ticket (teléfono + nombre del contacto).
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS affected_phone TEXT;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS affected_conversation TEXT;
 -- Adjuntos de un ticket (capturas, PDFs…). Igual que los mensajes: el binario vive
 -- en la base, y se sirve por una URL firmada para que el gestor de tareas lo abra.
 CREATE TABLE IF NOT EXISTS ticket_files (
@@ -1336,6 +1339,9 @@ app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
   const b = req.body || {};
   const asunto = String(b.asunto || '').trim();
   const desc = String(b.descripcion || '').trim();
+  // Conversación afectada (opcional): teléfono + nombre del contacto.
+  const afecPhone = String(b.telefono || b.affectedPhone || '').trim() || null;
+  const afecConv = String(b.conversacion || b.affectedConversation || '').trim() || null;
   if (!asunto || !desc) return res.status(400).json({ error: 'Asunto y descripción son obligatorios' });
   if (!TICKETS_API_KEY) return res.status(500).json({ error: 'Falta TICKETS_API_KEY en el servidor' });
 
@@ -1352,10 +1358,10 @@ app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
   let ticketId = null;
   try {
     const r0 = await q(
-      `INSERT INTO tickets (title, description, priority, category, status, origin, app, user_id, user_email, user_name)
-       VALUES ($1,$2,$3,$4,'nuevo',$5,$6,$7,$8,$9) RETURNING id`,
+      `INSERT INTO tickets (title, description, priority, category, status, origin, app, user_id, user_email, user_name, affected_phone, affected_conversation)
+       VALUES ($1,$2,$3,$4,'nuevo',$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
       [asunto, desc, String(b.prioridad || 'media'), b.categoria || null, b.origen || null, b.app || null,
-       (req.user && req.user.id) || null, u.email || (req.user && req.user.email) || null, u.name || null]);
+       (req.user && req.user.id) || null, u.email || (req.user && req.user.email) || null, u.name || null, afecPhone, afecConv]);
     ticketId = r0.rows[0] ? String(r0.rows[0].id) : null;
   } catch (e) { console.error('[tickets] guardar', e.message); }
 
@@ -1375,6 +1381,8 @@ app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
   const meta = [
     'Reportado por: ' + quien,
     b.categoria ? 'Categoría: ' + b.categoria : '',
+    afecConv ? 'Conversación afectada: ' + afecConv : '',
+    afecPhone ? 'Teléfono afectado: ' + afecPhone : '',
     'Origen: ' + (b.origen || '?') + (b.app ? ' (' + b.app + ')' : '')
   ].filter(Boolean).join('\n');
   // Los enlaces van dentro de la descripción para que se vean sí o sí, y además
@@ -1388,6 +1396,9 @@ app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
     description: desc + '\n\n— — —\n' + meta + bloqueAdj,
     priority: PRIORIDAD_PM[String(b.prioridad || '').toLowerCase()] || 'MEDIUM',
     stage: 'Nuevo',
+    // Conversación afectada, también como campos aparte (además de ir en la descripción).
+    affectedPhone: afecPhone,
+    affectedConversation: afecConv,
     // Va SIEMPRE, aunque esté vacío: así el receptor no tiene que comprobar si
     // el campo existe, solo recorrerlo.
     attachments: enlaces.map(f => ({ name: f.nombre, url: f.url, mime: f.mime, size: f.bytes }))
@@ -1459,6 +1470,7 @@ app.get('/api/tickets', wrap(async (req, res) => {
   if (!verTodos && hayUsuario) { params.push(req.user.id); filtro = 'WHERE user_id = $2'; }
   const r = await q(
     `SELECT id, title, description, priority, category, status, origin, user_email, user_name, external_id,
+            affected_phone, affected_conversation,
             EXTRACT(EPOCH FROM created_at)*1000 AS created_at, EXTRACT(EPOCH FROM completed_at)*1000 AS completed_at
      FROM tickets ${filtro} ORDER BY created_at DESC LIMIT $1`, params);
 
@@ -1482,6 +1494,7 @@ app.get('/api/tickets', wrap(async (req, res) => {
   res.json({ ok: true, admin: !!esAdmin, scope: verTodos ? 'all' : 'mine', tickets: r.rows.map(t => ({
     id: String(t.id), title: t.title, description: t.description, priority: t.priority, category: t.category,
     status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name,
+    affectedPhone: t.affected_phone || null, affectedConversation: t.affected_conversation || null,
     createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null,
     files: porTicket.get(String(t.id)) || []
   })) });

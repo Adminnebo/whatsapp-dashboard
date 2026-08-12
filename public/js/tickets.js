@@ -196,6 +196,7 @@
             ${t.category ? `<span class="tkbadge">${esc(t.category)}</span>` : ''}
           </div>
           <div class="tkdet__meta">Creado ${fechaLarga(t.createdAt)}${this._admin && t.userEmail ? ' · por ' + esc(t.userEmail) : ''}${t.completedAt ? ' · Resuelto ' + fechaLarga(t.completedAt) : ''}</div>
+          ${(t.affectedConversation || t.affectedPhone) ? `<div class="tkdet__meta">💬 Conversación afectada: ${esc(t.affectedConversation || '—')}${t.affectedPhone ? ' · 📞 ' + esc(t.affectedPhone) : ''}</div>` : ''}
           <div class="tkdet__desc">${esc(t.description || '—').replace(/\n/g, '<br>')}</div>
           ${imgs.length ? `<div class="tkdet__sec">Capturas</div><div class="tkdet__imgs">${imgs.map(f => `<a class="tkdet__img" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name)}"><img src="${esc(f.url)}" alt="${esc(f.name)}" loading="lazy" /></a>`).join('')}</div>` : ''}
           ${otros.length ? `<div class="tkdet__sec">Adjuntos</div><div class="tkitem__adjs">${otros.map(f => `<a class="tkitem__adj" href="${esc(f.url)}" target="_blank" rel="noopener">${iconoDe(f.mime)} ${esc(f.name)}</a>`).join('')}</div>` : ''}
@@ -204,6 +205,10 @@
 
     pintarForm() {
       const box = $('#ticketForm');
+      // Si hay una conversación abierta, pre-llenamos la conversación afectada.
+      const activa = (global.Store && Store.activeConversation && Store.activeConversation()) || null;
+      const preTel = activa && activa.phone ? activa.phone : '';
+      const preConv = activa && activa.name && activa.name !== '?' ? activa.name : '';
       box.innerHTML = `
         <label class="tk__lbl">Asunto
           <input id="tkAsunto" class="tk__inp" maxlength="120" placeholder="Resumen breve del problema" />
@@ -218,6 +223,14 @@
             <select id="tkCategoria" class="tk__inp">
               ${CATEGORIAS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
             </select>
+          </label>
+        </div>
+        <div class="tk__row">
+          <label class="tk__lbl">Conversación afectada <span class="tk__hint">(opcional)</span>
+            <input id="tkConv" class="tk__inp" maxlength="120" placeholder="Nombre del contacto" value="${esc(preConv)}" />
+          </label>
+          <label class="tk__lbl">Teléfono afectado <span class="tk__hint">(opcional)</span>
+            <input id="tkTel" class="tk__inp" maxlength="30" placeholder="Ej. 18091234567" value="${esc(preTel)}" />
           </label>
         </div>
         <label class="tk__lbl">Descripción
@@ -295,6 +308,8 @@
         descripcion: desc,
         prioridad: $('#tkPrioridad').value,
         categoria: $('#tkCategoria').value,
+        telefono: ($('#tkTel') && $('#tkTel').value.trim()) || '',
+        conversacion: ($('#tkConv') && $('#tkConv').value.trim()) || '',
         origen: 'web',
         app: 'inbox',
         usuario
