@@ -636,6 +636,49 @@ async function dedupeByConversation(convId) {
   if (r.rows[0]) await mergeTwoContacts(r.rows[0].cid, r.rows[0].oid);
 }
 
+// ── Barrido de contactos "?" (sin identidad) ─────────────────────────────────
+// Los envíos MANUALES desde GHL ("CRM Agente 1") llegan a save-out SIN teléfono ni
+// wamid (el wamid se agrega después) → crean un contacto vacío. Este barrido corre
+// cada pocos minutos, recupera el destinatario del wamid del mensaje y funde el
+// huérfano en el contacto real (o lo etiqueta con el teléfono/user_id si no existe).
+function recuperarDeWamid(wamid) {
+  if (!wamid) return {};
+  try {
+    const dec = Buffer.from(String(wamid).replace(/^wamid\./, ''), 'base64').toString('latin1');
+    const m = dec.match(/[A-Za-z]{2}\.\d{6,}/);
+    if (m) return { userId: m[0] };
+    const p = dec.match(/\d{10,15}/);
+    if (p) return { phone: p[0] };
+  } catch (_) {}
+  return {};
+}
+async function barrerHuerfanos() {
+  try {
+    const orphans = (await q(
+      `SELECT c.id, (SELECT id FROM conversations WHERE contact_id = c.id ORDER BY updated_at DESC LIMIT 1) AS conv
+       FROM contacts c
+       WHERE (c.name IS NULL OR trim(c.name) = '') AND c.phone IS NULL AND c.user_id IS NULL AND c.ghl_contact_id IS NULL
+         AND EXISTS (SELECT 1 FROM conversations cv WHERE cv.contact_id = c.id)
+       LIMIT 50`)).rows;
+    for (const o of orphans) {
+      const w = (await q(`SELECT wamid FROM messages WHERE conversation_id = $1 AND wamid IS NOT NULL ORDER BY id ASC LIMIT 1`, [o.conv])).rows[0];
+      const rec = recuperarDeWamid(w && w.wamid);
+      if (!rec.phone && !rec.userId) continue;
+      const real = (await q(
+        `SELECT id FROM contacts WHERE id <> $1 AND (
+           ($2::text IS NOT NULL AND (phone = $2 OR ghl_contact_id = $2 OR user_id = $2)) OR
+           ($3::text IS NOT NULL AND (user_id = $3 OR ghl_contact_id = $3 OR phone = $3)))
+         ORDER BY id LIMIT 1`, [o.id, rec.phone || null, rec.userId || null])).rows[0];
+      if (real) await mergeTwoContacts(real.id, o.id);
+      else await q(`UPDATE contacts SET phone = COALESCE(phone, $2), user_id = COALESCE(user_id, $3), updated_at = now() WHERE id = $1`,
+        [o.id, rec.phone || null, rec.userId || null]);
+    }
+    if (orphans.length) console.log('[huerfanos] barrido:', orphans.length, 'revisados');
+  } catch (e) { console.error('barrerHuerfanos', e.message); }
+}
+setInterval(barrerHuerfanos, 3 * 60 * 1000);   // cada 3 min
+setTimeout(barrerHuerfanos, 20 * 1000);         // primera pasada al arrancar
+
 // ==================== RUTAS API ====================
 
 app.get('/api/db-setup', wrap(async (_req, res) => { await migrate(); res.json({ ok: true, message: 'Tablas creadas correctamente.' }); }));
