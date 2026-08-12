@@ -1295,8 +1295,22 @@ app.post('/api/send', need('inbox.send'), wrap(async (req, res) => {
   let msgId = null, sent = false, error = null;
 
   if (n.channel === 'whatsapp') {
-    const to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
-    if (!to) error = 'El contacto no tiene teléfono';
+    // Destinatario: `to` explícito → teléfono del payload → y si no, lo resolvemos del
+    // contacto por la conversación (teléfono, o user_id para contactos "username").
+    let to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
+    if (!to) {
+      const convId = String(b.conversationId || '').replace(/[^0-9]/g, '');
+      const cid = b.contactId ? String(b.contactId).trim() : null;
+      const rc = await q(
+        `SELECT c.phone, c.user_id FROM contacts c
+         LEFT JOIN conversations cv ON cv.contact_id = c.id
+         WHERE ($1::bigint IS NOT NULL AND cv.id = $1::bigint)
+            OR ($2::text   IS NOT NULL AND (c.ghl_contact_id = $2 OR c.user_id = $2))
+         ORDER BY cv.id DESC LIMIT 1`, [convId || null, cid]);
+      const row = rc.rows[0];
+      if (row) to = (row.phone ? String(row.phone).replace(/[^\d]/g, '') : null) || row.user_id || null;
+    }
+    if (!to) error = 'El contacto no tiene teléfono ni user_id';
     else if (!WA_TOKEN || !WA_PHONE) error = 'WhatsApp no está configurado';
     else {
       const r = await waSend({ messaging_product: 'whatsapp', to, type: 'text', text: { body: b.text || '' } });
