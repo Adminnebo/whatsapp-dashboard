@@ -54,8 +54,8 @@ async function chargedFor(sentBy, model, costUsd) {
   if (pct == null || !Number.isFinite(pct)) return CLIENT_CHARGE_OUT;
   return Math.round(c * (1 + pct / 100) * 1e6) / 1e6;   // hasta 6 decimales
 }
-// Tickets → project-manager. La API key NO va al cliente: se queda aquí.
-const TICKETS_URL = process.env.TICKETS_URL || 'https://project-manager-production-1787.up.railway.app/api/ingest/tasks';
+// Tickets → webhook de n8n (o project-manager). La API key, si existe, se queda aquí.
+const TICKETS_URL = process.env.TICKETS_URL || 'https://server.neboaiconsulting.com/webhook/79685619-7dc4-4661-84e7-cf9d158fc051';
 const TICKETS_API_KEY = process.env.TICKETS_API_KEY || '';
 
 // ── CORS para la app móvil ───────────────────────────────────────────────────
@@ -1400,7 +1400,7 @@ app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
   const afecPhone = String(b.telefono || b.affectedPhone || '').trim() || null;
   const afecConv = String(b.conversacion || b.affectedConversation || '').trim() || null;
   if (!asunto || !desc) return res.status(400).json({ error: 'Asunto y descripción son obligatorios' });
-  if (!TICKETS_API_KEY) return res.status(500).json({ error: 'Falta TICKETS_API_KEY en el servidor' });
+  if (!TICKETS_URL) return res.status(500).json({ error: 'Falta TICKETS_URL en el servidor' });
 
   // Con multipart los campos llegan como texto; `usuario` viaja serializado.
   let u = b.usuario || {};
@@ -1464,7 +1464,8 @@ app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
   try {
     const r = await fetch(TICKETS_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': TICKETS_API_KEY },
+      // x-api-key solo si está configurada (el project-manager la pide; el webhook de n8n no).
+      headers: Object.assign({ 'Content-Type': 'application/json' }, TICKETS_API_KEY ? { 'x-api-key': TICKETS_API_KEY } : {}),
       body: JSON.stringify(payload)
     });
     const txt = await r.text();
