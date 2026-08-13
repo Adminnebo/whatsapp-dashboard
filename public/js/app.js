@@ -678,18 +678,52 @@
       // ajustes
       $('#btnSettings').addEventListener('click', () => this.openSettings());
       $('#btnSaveSettings').addEventListener('click', () => this.saveSettings());
+      // nuevo chat
+      const nc = $('#newChatBtn');
+      if (nc) nc.addEventListener('click', () => this.openNewChat());
+      const ncS = $('#ncSend');
+      if (ncS) ncS.addEventListener('click', () => this.sendNewChat());
       // cerrar modales
       document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
-        $('#settingsModal').hidden = true; $('#templateModal').hidden = true;
+        $('#settingsModal').hidden = true; $('#templateModal').hidden = true; $('#newChatModal').hidden = true;
       }));
       // cerrar visor de media
       document.querySelectorAll('[data-mclose]').forEach(b => b.addEventListener('click', () => UI.closeMedia()));
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
-          $('#settingsModal').hidden = true; $('#templateModal').hidden = true;
+          $('#settingsModal').hidden = true; $('#templateModal').hidden = true; $('#newChatModal').hidden = true;
           UI.closeMedia();
         }
       });
+    },
+
+    // ---------- nuevo chat: crear número + primer mensaje ----------
+    openNewChat() {
+      $('#ncErr').hidden = true;
+      $('#newChatModal').hidden = false;
+      setTimeout(() => { const p = $('#ncPhone'); if (p) p.focus(); }, 50);
+    },
+    async sendNewChat() {
+      const phone = ($('#ncPhone').value || '').replace(/[^\d]/g, '');
+      const name = ($('#ncName').value || '').trim();
+      const text = ($('#ncText').value || '').trim();
+      const err = $('#ncErr'); err.hidden = true;
+      if (phone.length < 8) { err.textContent = 'Pon el número con código de país (solo dígitos).'; err.hidden = false; return; }
+      if (!text) { err.textContent = 'Escribe el mensaje.'; err.hidden = false; return; }
+      const btn = $('#ncSend'); btn.disabled = true; btn.textContent = 'Enviando…';
+      try {
+        // /api/send crea el contacto+conversación por teléfono, envía por Cloud API y guarda.
+        const res = await Api.sendMessage({ channel: 'whatsapp', to: phone, phone: phone, name: name || null, type: 'text', text: text });
+        if (res && res.sent === false) throw new Error(res.error || 'El proveedor rechazó el mensaje');
+        $('#newChatModal').hidden = true;
+        $('#ncPhone').value = ''; $('#ncName').value = ''; $('#ncText').value = '';
+        await this.refreshData();
+        if (res && res.conversationId) this.openConversation(String(res.conversationId));
+        UI.toast('Mensaje enviado');
+      } catch (e) {
+        err.textContent = 'No se pudo enviar: ' + e.message;
+        err.hidden = false;
+      } finally { btn.disabled = false; btn.textContent = 'Enviar'; }
     },
 
     handleSend() {
