@@ -285,6 +285,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .newchat-btn:hover { filter: brightness(1.08); }
 .newchat-btn:active { transform: scale(.93); }
 .nc-err { color: #dc2626; font-size: 13px; margin: 6px 0 0; }
+.nc-tpl-form { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.nc-tpl-form .nc-var { width: 100%; }
+#ncTplPreview { white-space: pre-wrap; background: var(--hover); border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
 
 .notif__btn {
   position: relative; display: grid; place-items: center;

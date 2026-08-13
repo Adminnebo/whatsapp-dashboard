@@ -683,6 +683,10 @@
       if (nc) nc.addEventListener('click', () => this.openNewChat());
       const ncS = $('#ncSend');
       if (ncS) ncS.addEventListener('click', () => this.sendNewChat());
+      const ncMode = $('#ncMode');
+      if (ncMode) ncMode.addEventListener('change', () => this.ncModeChange());
+      const ncTpl = $('#ncTemplate');
+      if (ncTpl) ncTpl.addEventListener('change', () => this.ncTemplateChange());
       // cerrar modales
       document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
         $('#settingsModal').hidden = true; $('#templateModal').hidden = true; $('#newChatModal').hidden = true;
@@ -700,21 +704,72 @@
     // ---------- nuevo chat: crear número + primer mensaje ----------
     openNewChat() {
       $('#ncErr').hidden = true;
+      $('#ncMode').value = 'free';
+      this.ncModeChange();
       $('#newChatModal').hidden = false;
+      if (!Store.templates.length) this.loadTemplates().then(() => this.ncFillTemplates());
+      else this.ncFillTemplates();
       setTimeout(() => { const p = $('#ncPhone'); if (p) p.focus(); }, 50);
+    },
+    ncModeChange() {
+      const tpl = $('#ncMode').value === 'tpl';
+      $('#ncFreeGroup').hidden = tpl;
+      $('#ncTplGroup').hidden = !tpl;
+    },
+    ncFillTemplates() {
+      const sel = $('#ncTemplate'); if (!sel) return;
+      const aprob = (Store.templates || []).filter(t => t.status === 'APPROVED');
+      sel.innerHTML = '';
+      if (!aprob.length) { sel.innerHTML = '<option value="">No hay plantillas aprobadas</option>'; }
+      else aprob.forEach((t, i) => { const o = document.createElement('option'); o.value = String(i); o.textContent = t.name; sel.appendChild(o); });
+      this.ncTemplateChange();
+    },
+    ncTemplateChange() {
+      const aprob = (Store.templates || []).filter(t => t.status === 'APPROVED');
+      const tpl = aprob[Number($('#ncTemplate').value)] || null;
+      const form = $('#ncTplForm'), prev = $('#ncTplPreview');
+      if (!tpl) { form.innerHTML = ''; prev.textContent = ''; return; }
+      let html = '';
+      (tpl.header && tpl.header.format === 'TEXT' ? tpl.header.vars : []).forEach(n => {
+        html += `<input class="nc-var" id="ncH${n}" placeholder="Encabezado {{${n}}}" />`;
+      });
+      (tpl.body.vars || []).forEach(n => { html += `<input class="nc-var" id="ncB${n}" placeholder="Variable {{${n}}}" />`; });
+      if (tpl.header && tpl.header.format !== 'TEXT') {
+        html += `<input class="nc-var" id="ncMedia" placeholder="URL del ${tpl.header.format.toLowerCase()}" />`;
+      }
+      form.innerHTML = html;
+      prev.textContent = tpl.body.text || '';
     },
     async sendNewChat() {
       const phone = ($('#ncPhone').value || '').replace(/[^\d]/g, '');
       const name = ($('#ncName').value || '').trim();
-      const text = ($('#ncText').value || '').trim();
       const err = $('#ncErr'); err.hidden = true;
       if (phone.length < 8) { err.textContent = 'Pon el número con código de país (solo dígitos).'; err.hidden = false; return; }
-      if (!text) { err.textContent = 'Escribe el mensaje.'; err.hidden = false; return; }
+      const esTpl = $('#ncMode').value === 'tpl';
       const btn = $('#ncSend'); btn.disabled = true; btn.textContent = 'Enviando…';
+      const val = id => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
       try {
-        // /api/send crea el contacto+conversación por teléfono, envía por Cloud API y guarda.
-        const res = await Api.sendMessage({ channel: 'whatsapp', to: phone, phone: phone, name: name || null, type: 'text', text: text });
-        if (res && res.sent === false) throw new Error(res.error || 'El proveedor rechazó el mensaje');
+        let res;
+        if (esTpl) {
+          const aprob = (Store.templates || []).filter(t => t.status === 'APPROVED');
+          const tpl = aprob[Number($('#ncTemplate').value)];
+          if (!tpl) throw new Error('Elige una plantilla');
+          const bodyParams = [], headerParams = [], buttonParams = [];
+          (tpl.body.vars || []).forEach(n => { bodyParams[n - 1] = val('ncB' + n); });
+          if (tpl.header && tpl.header.format === 'TEXT') (tpl.header.vars || []).forEach(n => { headerParams[n - 1] = val('ncH' + n); });
+          if ([...bodyParams, ...headerParams].some(v => !v)) throw new Error('Rellena todas las variables de la plantilla');
+          const payload = { name: tpl.name, language: tpl.language, to: phone, contactName: name || null, bodyParams, headerParams, buttonParams, preview: tpl.body.text };
+          if (tpl.header && tpl.header.format !== 'TEXT') {
+            const link = val('ncMedia'); if (!link) throw new Error('Falta la URL del ' + tpl.header.format.toLowerCase());
+            payload.headerMedia = { type: tpl.header.format.toLowerCase(), link };
+          }
+          res = await Api.sendTemplate(payload);
+        } else {
+          const text = ($('#ncText').value || '').trim();
+          if (!text) throw new Error('Escribe el mensaje.');
+          res = await Api.sendMessage({ channel: 'whatsapp', to: phone, phone: phone, name: name || null, type: 'text', text: text });
+          if (res && res.sent === false) throw new Error(res.error || 'El proveedor rechazó el mensaje');
+        }
         $('#newChatModal').hidden = true;
         $('#ncPhone').value = ''; $('#ncName').value = ''; $('#ncText').value = '';
         await this.refreshData();

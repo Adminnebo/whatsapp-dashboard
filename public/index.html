@@ -262,9 +262,21 @@
           <input type="text" id="ncName" placeholder="Nombre del contacto" autocomplete="off" />
         </div>
         <div class="form-group">
+          <label>Tipo de mensaje</label>
+          <select id="ncMode">
+            <option value="free">Mensaje libre — solo si escribió en 24&nbsp;h</option>
+            <option value="tpl">Plantilla — para números nuevos / fríos</option>
+          </select>
+        </div>
+        <div class="form-group" id="ncFreeGroup">
           <label>Mensaje</label>
           <textarea id="ncText" rows="3" placeholder="Escribe el primer mensaje…"></textarea>
-          <p class="hint">WhatsApp solo permite texto libre si el número escribió en las últimas 24&nbsp;h. Para un número frío, Meta exige una <b>plantilla</b>.</p>
+        </div>
+        <div class="form-group" id="ncTplGroup" hidden>
+          <label>Plantilla</label>
+          <select id="ncTemplate"></select>
+          <div id="ncTplForm" class="nc-tpl-form"></div>
+          <p class="hint" id="ncTplPreview"></p>
         </div>
         <p class="nc-err" id="ncErr" hidden></p>
       </div>
