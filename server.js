@@ -192,6 +192,18 @@ async function waSend(payload) {
   const json = await res.json().catch(() => null);
   return { ok: res.ok, status: res.status, json };
 }
+// Decide el destinatario de un envío de WhatsApp: un teléfono REAL (10–15 dígitos y
+// distinto de los dígitos del user_id) va como { to }; si no hay teléfono válido pero
+// hay user_id de Meta (contactos "username", formato DO./US./…) va como { recipient }.
+// (Meta rechaza el user_id en `to` porque lo valida como teléfono.)
+function waDestino(phoneRaw, userId) {
+  const tel = phoneRaw ? String(phoneRaw).replace(/[^\d]/g, '') : '';
+  const uidDigits = userId ? String(userId).replace(/[^\d]/g, '') : '';
+  if (/^\d{10,15}$/.test(tel) && tel !== uidDigits) return { to: tel };
+  if (userId) return { recipient: String(userId).trim() };
+  if (tel) return { to: tel };
+  return null;
+}
 // Llamada genérica a la Graph API con el token de WhatsApp.
 async function graph(pathname) {
   const sep = pathname.includes('?') ? '&' : '?';
@@ -1295,12 +1307,13 @@ app.post('/api/send', need('inbox.send'), wrap(async (req, res) => {
   let msgId = null, sent = false, error = null;
 
   if (n.channel === 'whatsapp') {
-    // Destinatario: `to` explícito → teléfono del payload → y si no, lo resolvemos del
-    // contacto por la conversación (teléfono, o user_id para contactos "username").
-    let to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
-    if (!to) {
-      const convId = String(b.conversationId || '').replace(/[^0-9]/g, '');
-      const cid = b.contactId ? String(b.contactId).trim() : null;
+    // Resolver teléfono + user_id del contacto (el UI puede mandar `to` con el teléfono
+    // falso de un contacto username; por eso también miramos el contacto real).
+    let phone = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
+    let userId = n.userId || null;
+    const convId = String(b.conversationId || '').replace(/[^0-9]/g, '');
+    const cid = b.contactId ? String(b.contactId).trim() : null;
+    if (convId || cid) {
       const rc = await q(
         `SELECT c.phone, c.user_id FROM contacts c
          LEFT JOIN conversations cv ON cv.contact_id = c.id
@@ -1308,12 +1321,13 @@ app.post('/api/send', need('inbox.send'), wrap(async (req, res) => {
             OR ($2::text   IS NOT NULL AND (c.ghl_contact_id = $2 OR c.user_id = $2))
          ORDER BY cv.id DESC LIMIT 1`, [convId || null, cid]);
       const row = rc.rows[0];
-      if (row) to = (row.phone ? String(row.phone).replace(/[^\d]/g, '') : null) || row.user_id || null;
+      if (row) { if (!phone) phone = row.phone ? String(row.phone).replace(/[^\d]/g, '') : null; userId = userId || row.user_id || null; }
     }
-    if (!to) error = 'El contacto no tiene teléfono ni user_id';
+    const dest = waDestino(phone, userId);   // { to } o { recipient }
+    if (!dest) error = 'El contacto no tiene teléfono válido ni user_id';
     else if (!WA_TOKEN || !WA_PHONE) error = 'WhatsApp no está configurado';
     else {
-      const r = await waSend({ messaging_product: 'whatsapp', to, type: 'text', text: { body: b.text || '' } });
+      const r = await waSend(Object.assign({ messaging_product: 'whatsapp', recipient_type: 'individual', type: 'text', text: { body: b.text || '' } }, dest));
       msgId = r.json && r.json.messages && r.json.messages[0] ? r.json.messages[0].id : null;
       sent = !!msgId;
       if (!sent) error = metaError(r.json);
@@ -1692,14 +1706,27 @@ app.post('/api/send-media', need('inbox.send'), upload.single('file'), wrap(asyn
   if (!mediaUrl) {
     error = 'No se pudo preparar el adjunto';
   } else if (n.channel === 'whatsapp') {
-    const to = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
-    if (!to) error = 'El contacto no tiene teléfono';
+    // Igual que /api/send: teléfono real → {to}; contacto username → {recipient: user_id}.
+    let phone = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
+    let userId = n.userId || null;
+    const convId = String(b.conversationId || '').replace(/[^0-9]/g, '');
+    const cid = b.contactId ? String(b.contactId).trim() : null;
+    if (convId || cid) {
+      const rc = await q(
+        `SELECT c.phone, c.user_id FROM contacts c LEFT JOIN conversations cv ON cv.contact_id = c.id
+         WHERE ($1::bigint IS NOT NULL AND cv.id = $1::bigint) OR ($2::text IS NOT NULL AND (c.ghl_contact_id = $2 OR c.user_id = $2))
+         ORDER BY cv.id DESC LIMIT 1`, [convId || null, cid]);
+      const row = rc.rows[0];
+      if (row) { if (!phone) phone = row.phone ? String(row.phone).replace(/[^\d]/g, '') : null; userId = userId || row.user_id || null; }
+    }
+    const dest = waDestino(phone, userId);
+    if (!dest) error = 'El contacto no tiene teléfono válido ni user_id';
     else if (!WA_TOKEN || !WA_PHONE) error = 'WhatsApp no está configurado';
     else {
       const media = { link: mediaUrl };
       if (n.type === 'document') media.filename = n.mediaName || 'documento';
       if (n.text && n.type !== 'audio') media.caption = n.text;
-      const waBody = { messaging_product: 'whatsapp', to, type: n.type }; waBody[n.type] = media;
+      const waBody = Object.assign({ messaging_product: 'whatsapp', recipient_type: 'individual', type: n.type }, dest); waBody[n.type] = media;
       const r = await waSend(waBody);
       msgId = r.json && r.json.messages && r.json.messages[0] ? r.json.messages[0].id : null;
       sent = !!msgId;
