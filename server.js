@@ -733,9 +733,11 @@ app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res)
 app.get('/api/messages', need('inbox.conversations'), wrap(async (req, res) => {
   const id = String(req.query.conversationId || '');
   if (!id) return res.json({ messages: [], hasMore: false });
-  // Paginación: se cargan los ÚLTIMOS `limit` mensajes al abrir; con `before`=<id del
-  // más antiguo ya cargado> se traen los `limit` anteriores (scroll hacia arriba).
-  const limit = Math.min(200, Math.max(10, Number(req.query.limit) || 50));
+  // Paginación SOLO si el cliente pide `limit` (inbox web): trae los últimos `limit`
+  // y, con `before`, los anteriores. Si NO viene `limit` (p.ej. el APK móvil actual),
+  // devuelve TODO el historial — así no se rompe el móvil sin recompilar.
+  const paginar = req.query.limit != null && String(req.query.limit).trim() !== '';
+  const limit = paginar ? Math.min(200, Math.max(10, Number(req.query.limit) || 50)) : 100000;
   const before = String(req.query.before || '').replace(/[^0-9]/g, '') || null;
   // El UPDATE de leído SOLO en la carga inicial (sin cursor): abrir un chat ya leído no
   // escribe, y "cargar anteriores" nunca toca el unread.
@@ -795,7 +797,7 @@ app.get('/api/messages', need('inbox.conversations'), wrap(async (req, res) => {
     };
   });
   // hasMore: si llenó el page, probablemente hay más antiguos hacia arriba.
-  res.json({ messages, hasMore: r.rows.length === limit });
+  res.json({ messages, hasMore: paginar && r.rows.length === limit });
 }));
 
 app.get('/api/media', wrap(async (req, res) => {
