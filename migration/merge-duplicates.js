@@ -35,6 +35,14 @@ const esMeta = v => /^[A-Za-z]{2}\.\d+$/.test(v || '');
 
   // 1) Cargar contactos + sus identificadores.
   const cs = (await q(`SELECT id, ghl_contact_id, phone, user_id, name, handoff FROM contacts`)).rows;
+  // Dígitos del user_id de Meta: une la forma CON prefijo (DO.2243…) con la forma
+  // SIN prefijo (2243…). No toma teléfonos (≤13 dígitos) ni ids GHL alfanuméricos.
+  const metaDigits = v => {
+    const s = String(v || '').trim();
+    if (/^[A-Za-z]{2}\.\d{6,}$/.test(s)) return s.replace(/\D/g, '');   // DO.2243…
+    if (/^\d{14,}$/.test(s)) return s;                                   // 2243… (bare, no es teléfono)
+    return null;
+  };
   const uf = makeUF();
   const byVal = new Map();   // valor identificador -> [contactIds]
   for (const c of cs) {
@@ -45,6 +53,8 @@ const esMeta = v => /^[A-Za-z]{2}\.\d+$/.test(v || '');
       if (!byVal.has(val)) byVal.set(val, []);
       byVal.get(val).push(c.id);
     }
+    const mk = metaDigits(c.user_id) || metaDigits(c.ghl_contact_id);
+    if (mk) { const k = 'meta:' + mk; if (!byVal.has(k)) byVal.set(k, []); byVal.get(k).push(c.id); }
   }
   // 2) Unir contactos que comparten un valor.
   for (const ids of byVal.values()) for (let i = 1; i < ids.length; i++) uf.union(ids[0], ids[i]);

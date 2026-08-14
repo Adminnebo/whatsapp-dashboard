@@ -510,6 +510,11 @@ function normalize(body, file, direction) {
   // como user_id hace que se rellene esa columna y que los mensajes que llegan SOLO con el
   // user_id (p.ej. las respuestas del bot, sin teléfono) encuentren al contacto → sin duplicar.
   if (contactId && /^[A-Za-z]{2}\.\d+$/.test(contactId)) { userId = userId || contactId; contactId = null; }
+  // Un id de 14+ dígitos NO es un teléfono ni un id de GHL: es el user_id de Meta SIN
+  // prefijo (p.ej. 2243444719802248 = DO.2243444719802248). Va a user_id, no a
+  // ghl_contact_id/phone → evita el contacto "?" duplicado.
+  if (contactId && /^\d{14,}$/.test(contactId)) { userId = userId || contactId; contactId = null; }
+  if (phone && /^\d{14,}$/.test(phone)) { userId = userId || phone; phone = null; }
   // Rescate del destinatario desde el wamid: los envíos MANUALES (agente/CRM) a veces
   // llaman sin teléfono ni id. El wamid de Meta lleva codificado el destinatario
   // (teléfono, o user_id XX.dígitos) → lo recuperamos para pegar el mensaje al contacto
@@ -636,16 +641,29 @@ async function mergeTwoContacts(id1, id2) {
 // sí, los fusiona. Cubre el caso de duplicados por orden de llegada de identificadores.
 async function dedupeByConversation(convId) {
   if (!convId) return;
+  const cr = await q(`SELECT c.id, c.phone, c.user_id, c.ghl_contact_id
+                      FROM conversations cv JOIN contacts c ON c.id = cv.contact_id WHERE cv.id = $1::bigint`, [convId]);
+  const c = cr.rows[0]; if (!c) return;
+  const md = metaDigitsOf(c.user_id) || metaDigitsOf(c.ghl_contact_id);   // dígitos del user_id de Meta
   const r = await q(
-    `SELECT c.id AS cid, o.id AS oid
-     FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
-     JOIN contacts o ON o.id <> c.id AND (
-        (c.phone          IS NOT NULL AND (o.phone = c.phone OR o.ghl_contact_id = c.phone OR o.user_id = c.phone)) OR
-        (c.user_id        IS NOT NULL AND (o.user_id = c.user_id OR o.phone = c.user_id OR o.ghl_contact_id = c.user_id)) OR
-        (c.ghl_contact_id IS NOT NULL AND (o.ghl_contact_id = c.ghl_contact_id OR o.phone = c.ghl_contact_id OR o.user_id = c.ghl_contact_id))
-     )
-     WHERE cv.id = $1::bigint LIMIT 1`, [convId]);
-  if (r.rows[0]) await mergeTwoContacts(r.rows[0].cid, r.rows[0].oid);
+    `SELECT o.id AS oid FROM contacts o WHERE o.id <> $1 AND (
+        ($2::text IS NOT NULL AND (o.phone = $2 OR o.ghl_contact_id = $2 OR o.user_id = $2)) OR
+        ($3::text IS NOT NULL AND (o.user_id = $3 OR o.phone = $3 OR o.ghl_contact_id = $3)) OR
+        ($4::text IS NOT NULL AND (o.ghl_contact_id = $4 OR o.phone = $4 OR o.user_id = $4)) OR
+        -- match por DÍGITOS del user_id de Meta (une "DO.2243…" con "2243…")
+        ($5::text IS NOT NULL AND (
+           regexp_replace(COALESCE(o.user_id, ''),        '\\D', '', 'g') = $5 OR
+           regexp_replace(COALESCE(o.ghl_contact_id, ''), '\\D', '', 'g') = $5 ))
+     ) LIMIT 1`, [c.id, c.phone || null, c.user_id || null, c.ghl_contact_id || null, md || null]);
+  if (r.rows[0]) await mergeTwoContacts(c.id, r.rows[0].oid);
+}
+// Dígitos del user_id de Meta: une la forma con prefijo (DO.2243…) con la de solo
+// dígitos (2243…). No aplica a teléfonos (≤13 dígitos) ni ids GHL alfanuméricos.
+function metaDigitsOf(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (/^[A-Za-z]{2}\.\d{6,}$/.test(s)) return s.replace(/\D/g, '');
+  if (/^\d{14,}$/.test(s)) return s;
+  return null;
 }
 
 // ── Barrido de contactos "?" (sin identidad) ─────────────────────────────────
@@ -713,9 +731,9 @@ app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res)
       ${filtro}
       ORDER BY conv.last_message_at DESC NULLS LAST`, params);
   const conversations = r.rows.map(row => {
-    // Fallback de display: nombre → teléfono → user_id de Meta (contactos "username"
-    // sin teléfono) → '?'. Así un contacto por username no se ve como "?".
-    const nm = row.name || row.phone || row.user_id || '?';
+    // Fallback de display: nombre → teléfono → user_id de Meta → id externo → '?'.
+    // Así un contacto por username (sin teléfono/nombre) muestra su id, no "?".
+    const nm = row.name || row.phone || row.user_id || row.ghl_contact_id || '?';
     return {
       id: String(row.id), contactId: row.ghl_contact_id || null, userId: row.user_id || null, name: nm, phone: row.phone,
       avatar: { initials: initials(nm), color: colorFor(nm) }, channel: row.channel || 'whatsapp',
