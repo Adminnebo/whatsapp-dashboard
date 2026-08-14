@@ -1343,6 +1343,11 @@ app.post('/api/send', need('inbox.send'), wrap(async (req, res) => {
       const row = rc.rows[0];
       if (row) { if (!phone) phone = row.phone ? String(row.phone).replace(/[^\d]/g, '') : null; userId = userId || row.user_id || null; }
     }
+    // Pegar el mensaje al contacto YA existente: sin esto, un contacto username (sin
+    // ghl_contact_id y cuyo teléfono no viaja en el payload) no se matchea y saveMessage
+    // crearía un "?" nuevo. Le pasamos el user_id y el teléfono REAL resueltos.
+    n.userId = userId || n.userId || null;
+    if (phone && /^\d{10,15}$/.test(phone) && phone !== String(userId || '').replace(/\D/g, '')) n.phone = phone;
     const dest = waDestino(phone, userId);   // { to } o { recipient }
     if (!dest) error = 'El contacto no tiene teléfono válido ni user_id';
     else if (!WA_TOKEN || !WA_PHONE) error = 'WhatsApp no está configurado';
@@ -1739,6 +1744,9 @@ app.post('/api/send-media', need('inbox.send'), upload.single('file'), wrap(asyn
       const row = rc.rows[0];
       if (row) { if (!phone) phone = row.phone ? String(row.phone).replace(/[^\d]/g, '') : null; userId = userId || row.user_id || null; }
     }
+    // Pegar el adjunto al contacto YA existente (evita el "?" en contactos username).
+    n.userId = userId || n.userId || null;
+    if (phone && /^\d{10,15}$/.test(phone) && phone !== String(userId || '').replace(/\D/g, '')) n.phone = phone;
     const dest = waDestino(phone, userId);
     if (!dest) error = 'El contacto no tiene teléfono válido ni user_id';
     else if (!WA_TOKEN || !WA_PHONE) error = 'WhatsApp no está configurado';
