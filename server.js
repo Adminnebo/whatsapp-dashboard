@@ -706,8 +706,8 @@ async function barrerHuerfanos() {
     if (orphans.length) console.log('[huerfanos] barrido:', orphans.length, 'revisados');
   } catch (e) { console.error('barrerHuerfanos', e.message); }
 }
-setInterval(barrerHuerfanos, 3 * 60 * 1000);   // cada 3 min
-setTimeout(barrerHuerfanos, 20 * 1000);         // primera pasada al arrancar
+setInterval(barrerHuerfanos, 60 * 1000);        // cada 1 min
+setTimeout(barrerHuerfanos, 15 * 1000);         // primera pasada al arrancar
 
 // ==================== RUTAS API ====================
 
