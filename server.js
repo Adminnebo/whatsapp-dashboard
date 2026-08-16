@@ -192,6 +192,15 @@ async function waSend(payload) {
   const json = await res.json().catch(() => null);
   return { ok: res.ok, status: res.status, json };
 }
+// Normaliza un teléfono de WhatsApp a dígitos, anteponiendo el código de país cuando
+// falta: un número dominicano de 10 dígitos (809/829/849 + 7) queda como 1+numero.
+// Sin esto, Meta rechaza el número → envíos que fallan en silencio y chats fantasma.
+function normWaPhone(v) {
+  const d = v == null ? '' : String(v).replace(/[^\d]/g, '');
+  if (!d) return null;
+  if (/^(809|829|849)\d{7}$/.test(d)) return '1' + d;   // RD sin código de país → +1
+  return d;
+}
 // Decide el destinatario de un envío de WhatsApp: un teléfono REAL (10–15 dígitos y
 // distinto de los dígitos del user_id) va como { to }; si no hay teléfono válido pero
 // hay user_id de Meta (contactos "username", formato DO./US./…) va como { recipient }.
@@ -451,7 +460,7 @@ function normalize(body, file, direction) {
   let ts = body.timestamp;
   if (ts == null || ts === '') ts = Math.floor(Date.now() / 1000);
   else { ts = Number(ts); if (ts > 1e12) ts = Math.floor(ts / 1000); }
-  let phone = body.phone ? String(body.phone).replace(/[^\d]/g, '') : null;
+  let phone = normWaPhone(body.phone);
   let chRaw = String(body.channel || '').trim().toLowerCase();
   chRaw = CH_ALIAS[chRaw] || chRaw;
   const ch = CHANNELS_OK.includes(chRaw) ? chRaw : 'whatsapp';
@@ -1329,7 +1338,7 @@ app.post('/api/send', need('inbox.send'), wrap(async (req, res) => {
   if (n.channel === 'whatsapp') {
     // Resolver teléfono + user_id del contacto (el UI puede mandar `to` con el teléfono
     // falso de un contacto username; por eso también miramos el contacto real).
-    let phone = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
+    let phone = b.to ? normWaPhone(b.to) : (n.phone || null);
     let userId = n.userId || null;
     const convId = String(b.conversationId || '').replace(/[^0-9]/g, '');
     const cid = b.contactId ? String(b.contactId).trim() : null;
@@ -1732,7 +1741,7 @@ app.post('/api/send-media', need('inbox.send'), upload.single('file'), wrap(asyn
     error = 'No se pudo preparar el adjunto';
   } else if (n.channel === 'whatsapp') {
     // Igual que /api/send: teléfono real → {to}; contacto username → {recipient: user_id}.
-    let phone = b.to ? String(b.to).replace(/[^\d]/g, '') : (n.phone || null);
+    let phone = b.to ? normWaPhone(b.to) : (n.phone || null);
     let userId = n.userId || null;
     const convId = String(b.conversationId || '').replace(/[^0-9]/g, '');
     const cid = b.contactId ? String(b.contactId).trim() : null;
