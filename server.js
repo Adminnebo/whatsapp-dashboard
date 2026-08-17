@@ -1780,7 +1780,7 @@ app.post('/api/tickets/webhook', wrap(async (req, res) => {
   const b = req.body || {};
   // Secreto: header, Bearer, query ?secret= o campo en el body — lo que soporte el emisor.
   const bearer = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  const secret = req.get('x-webhook-secret') || bearer || req.query.secret || b.secret || '';
+  const secret = req.get('x-webhook-secret') || req.get('x-api-key') || bearer || req.query.secret || b.secret || '';
   if (!TICKETS_WEBHOOK_SECRET) return res.status(503).json({ error: 'Webhook sin configurar (falta TICKETS_WEBHOOK_SECRET)' });
   if (secret !== TICKETS_WEBHOOK_SECRET) return res.status(401).json({ error: 'Secreto inválido' });
 
