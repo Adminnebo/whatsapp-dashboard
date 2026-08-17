@@ -136,7 +136,7 @@ app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 // (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
 // (/tickets/file igual: la abre el gestor de tareas desde fuera, con la firma en la URL)
-const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/ghl/contact', '/contact', '/handoff-set']);
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/tickets/list', '/ghl/contact', '/contact', '/handoff-set']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
@@ -1693,6 +1693,49 @@ app.get('/api/tickets', wrap(async (req, res) => {
   res.json({ ok: true, admin: !!esAdmin, scope: verTodos ? 'all' : 'mine', tickets: r.rows.map(t => ({
     id: String(t.id), title: t.title, description: t.description, priority: t.priority, category: t.category,
     status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name,
+    affectedPhone: t.affected_phone || null, affectedConversation: t.affected_conversation || null,
+    createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null,
+    files: porTicket.get(String(t.id)) || []
+  })) });
+}));
+
+// ── Listado de tickets para sistemas externos (API key fija, sin sesión) ─────
+// Auth por clave compartida TICKETS_LIST_KEY (header X-Api-Key, Bearer o ?key=).
+// (Distinta de TICKETS_API_KEY, que es la clave SALIENTE al crear tickets.)
+// Devuelve TODOS los tickets (no filtra por usuario). Pensado para consumir
+// desde n8n u otro sistema sin token que expire. Va en OPEN_API (salta el gate).
+const TICKETS_LIST_KEY = process.env.TICKETS_LIST_KEY || '';
+app.get('/api/tickets/list', wrap(async (req, res) => {
+  const key = req.get('x-api-key') || (req.get('authorization') || '').replace(/^Bearer\s+/i, '') || req.query.key || '';
+  if (!TICKETS_LIST_KEY) return res.status(503).json({ error: 'TICKETS_LIST_KEY no configurada en el servidor' });
+  if (key !== TICKETS_LIST_KEY) return res.status(401).json({ error: 'API key inválida' });
+
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+  const status = String(req.query.status || '').trim();       // opcional: filtrar por estado
+  const params = [limit];
+  let filtro = '';
+  if (status) { params.push(status); filtro = 'WHERE status = $2'; }
+  const r = await q(
+    `SELECT id, title, description, priority, category, status, origin, user_email, user_name, external_id,
+            affected_phone, affected_conversation,
+            EXTRACT(EPOCH FROM created_at)*1000 AS created_at, EXTRACT(EPOCH FROM completed_at)*1000 AS completed_at
+     FROM tickets ${filtro} ORDER BY created_at DESC LIMIT $1`, params);
+
+  const ids = r.rows.map(t => String(t.id));
+  const porTicket = new Map();
+  if (ids.length) {
+    const rf = await q(
+      `SELECT id, ticket_id, filename, mime, size_bytes FROM ticket_files
+       WHERE ticket_id = ANY($1::bigint[]) ORDER BY id`, [ids]);
+    for (const f of rf.rows) {
+      const k = String(f.ticket_id);
+      if (!porTicket.has(k)) porTicket.set(k, []);
+      porTicket.get(k).push({ id: String(f.id), name: f.filename || 'adjunto', mime: f.mime || null, size: Number(f.size_bytes) || 0, url: tfUrlFor(req, f.id) });
+    }
+  }
+  res.json({ ok: true, count: r.rows.length, tickets: r.rows.map(t => ({
+    id: String(t.id), title: t.title, description: t.description, priority: t.priority, category: t.category,
+    status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name, externalId: t.external_id || null,
     affectedPhone: t.affected_phone || null, affectedConversation: t.affected_conversation || null,
     createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null,
     files: porTicket.get(String(t.id)) || []
