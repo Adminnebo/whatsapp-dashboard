@@ -50,7 +50,8 @@
     templates: [],        // plantillas aprobadas en Meta (se cargan de /api/wa-templates)
     templatesError: null,
     activeId: null,
-    filter: 'all',       // all | unread | handoff | whatsapp | instagram | facebook | pagina_web
+    filter: 'all',       // all | unread | handoff | blocked | whatsapp | instagram | facebook | pagina_web
+    blockedList: null,   // lista de bloqueados (de /api/blocked); null = aún no cargada
     search: '',
     renderLimit: 25,     // cuántas conversaciones se pintan en la lista (paginación cliente)
 

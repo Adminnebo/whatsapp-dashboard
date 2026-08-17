@@ -131,11 +131,18 @@
       return await http(S().botSetUrl, { method: 'POST', headers: headers(), body: JSON.stringify({ active: !!active }) });
     },
 
-    // Bloquear/desbloquear un contacto: Camila deja de responderle (todos los
-    // canales). Se resuelve por conversationId en el servidor.
-    async blockSet(conversationId, blocked) {
+    // Bloquear/desbloquear un contacto. `target` puede ser un conversationId (valor)
+    // o un objeto { conversationId | phone | userId }. Bloquear un `phone` que no
+    // existe crea el contacto (bloqueo proactivo).
+    async blockSet(target, blocked) {
       const url = S().blockSetUrl || '/api/block-set';
-      return await http(url, { method: 'POST', headers: headers(), body: JSON.stringify({ conversationId, blocked: !!blocked }) });
+      const body = Object.assign({ blocked: !!blocked },
+        (target && typeof target === 'object') ? target : { conversationId: target });
+      return await http(url, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+    },
+    // Lista de contactos bloqueados (incluye los que no tienen conversación).
+    async listBlocked() {
+      return await http('/api/blocked', { method: 'GET', headers: headers() });
     },
 
     // ---------------------------------------------------------------

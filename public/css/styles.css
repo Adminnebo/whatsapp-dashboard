@@ -812,3 +812,23 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 [data-theme="dark"] .pill-toggle--blockbtn { background:#2a2f3a; color:#cbd5e1; }
 [data-theme="dark"] .pill-toggle--blockbtn:hover { background:#333a47; }
 [data-theme="dark"] .pill-toggle--blocked { background:#b91c1c; color:#fff; }
+
+/* ── Sección Bloqueados: alta manual de números + lista ───────────────────── */
+.blk-add { display:flex; gap:8px; padding:12px 12px 4px; }
+.blk-add__input { flex:1; min-width:0; padding:9px 11px; border:1px solid var(--border,#d9dde3); border-radius:9px; font-size:14px; background:#fff; color:#111; }
+[data-theme="dark"] .blk-add__input { background:#1b1f27; color:#e5e7eb; border-color:#333a47; }
+.blk-add__btn { padding:9px 14px; border:none; border-radius:9px; background:#374151; color:#fff; font-weight:600; font-size:13px; cursor:pointer; white-space:nowrap; }
+.blk-add__btn:hover { background:#1f2937; }
+.blk-hint { padding:0 12px 10px; font-size:12px; color:#9aa3b2; }
+.blk-list { padding:0 6px 12px; }
+.blk-empty { padding:24px 16px; text-align:center; color:#9aa3b2; font-size:13.5px; }
+.blk-row { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px; }
+.blk-row--conv { cursor:pointer; }
+.blk-row:hover { background:rgba(0,0,0,.04); }
+[data-theme="dark"] .blk-row:hover { background:rgba(255,255,255,.05); }
+.blk-row__main { flex:1; min-width:0; }
+.blk-row__name { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.blk-row__sub { font-size:12px; color:#9aa3b2; }
+.blk-row__btn { padding:6px 11px; border:1px solid var(--border,#d9dde3); border-radius:8px; background:transparent; color:#4b5563; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+.blk-row__btn:hover { border-color:#dc2626; color:#dc2626; }
+[data-theme="dark"] .blk-row__btn { color:#cbd5e1; border-color:#333a47; }

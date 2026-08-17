@@ -1327,6 +1327,19 @@ app.post('/api/block-set', need('inbox.conversations'), wrap(async (req, res) =>
                                      WHEN c.user_id        = $1::text THEN 1 ELSE 2 END LIMIT 1`, [ext, phoneIn]);
     row = r.rows[0];
   }
+  // Bloqueo PROACTIVO: si es para bloquear un número que aún no existe como
+  // contacto, lo creamos (sin conversación) para que el bot lo ignore al escribir.
+  if (!row && block && phoneIn) {
+    const norm = normWaPhone(phoneIn);
+    const ex = await q(`SELECT id FROM contacts WHERE phone = $1 LIMIT 1`, [norm]);
+    const cid = ex.rows[0] ? ex.rows[0].id
+      : (await q(`INSERT INTO contacts (phone, blocked, blocked_at) VALUES ($1, true, now()) RETURNING id`, [norm])).rows[0].id;
+    await q(`UPDATE contacts SET blocked = true, blocked_at = COALESCE(blocked_at, now()) WHERE id = $1`, [cid]);
+    await mirrorBotActive({ phone: norm, userId: null, active: false });
+    await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
+             VALUES ('contact_block','Agente (bot)', NULL, $1)`, ['Número bloqueado manualmente: ' + norm]);
+    return res.json({ ok: true, blocked: true, contactId: String(cid), conversationId: null, phone: norm, created: !ex.rows[0] });
+  }
   if (!row) return res.status(404).json({ error: 'Contacto no encontrado' });
 
   // Bot activo para ESTE contacto tras el cambio: solo si !handoff && !blocked.
@@ -1359,13 +1372,17 @@ app.get('/api/blocked', need('inbox.conversations'), wrap(async (_req, res) => {
       LEFT JOIN conversations cv ON cv.contact_id = c.id
       WHERE c.blocked = true
       ORDER BY c.blocked_at DESC NULLS LAST`);
-  res.json({ blocked: r.rows.map(x => ({
-    contactId: String(x.id), conversationId: x.conv_id ? String(x.conv_id) : null,
-    userId: x.user_id || null, name: x.name || x.phone || x.user_id || x.ghl_contact_id || '?',
-    phone: x.phone || null, channel: x.channel || 'whatsapp',
-    blockedAt: x.blocked_at || null, lastMessage: x.last_message || '',
-    lastMessageAt: Number(x.last_message_at) || 0
-  })) });
+  res.json({ blocked: r.rows.map(x => {
+    const nm = x.name || x.phone || x.user_id || x.ghl_contact_id || '?';
+    return {
+      contactId: String(x.id), conversationId: x.conv_id ? String(x.conv_id) : null,
+      hasConversation: !!x.conv_id,
+      userId: x.user_id || null, name: nm, phone: x.phone || null, channel: x.channel || 'whatsapp',
+      avatarInitials: initials(nm), avatarColor: colorFor(nm),
+      blockedAt: x.blocked_at || null, lastMessage: x.last_message || '',
+      lastMessageAt: Number(x.last_message_at) || 0
+    };
+  }) });
 }));
 
 // ---- notificaciones ----

@@ -261,6 +261,37 @@
       }
     },
 
+    // ---------- sección Bloqueados ----------
+    async loadBlocked() {
+      try { const d = await Api.listBlocked(); Store.blockedList = (d && d.blocked) || []; }
+      catch (e) { Store.blockedList = Store.blockedList || []; UI.toast('No se pudo cargar bloqueados: ' + e.message); }
+      if (Store.filter === 'blocked') UI.renderList();
+    },
+    // Alta manual: bloquear un número aunque no exista como contacto (proactivo).
+    async blockNumber() {
+      const input = document.querySelector('#blkNumber'); if (!input) return;
+      const digits = (input.value || '').replace(/[^\d]/g, '');
+      if (digits.length < 7) { UI.toast('Escribe un número válido'); return; }
+      try {
+        const r = await Api.blockSet({ phone: digits }, true);
+        input.value = '';
+        UI.toast(r && r.created === false ? 'Ese número ya estaba; queda bloqueado' : 'Número bloqueado: ' + ((r && r.phone) || digits));
+        await this.loadBlocked();
+      } catch (e) { UI.toast('No se pudo bloquear: ' + e.message); }
+    },
+    async unblockContact(b) {
+      const target = b.conversationId ? { conversationId: b.conversationId }
+        : (b.phone ? { phone: b.phone } : { userId: b.userId });
+      try {
+        await Api.blockSet(target, false);
+        UI.toast('Desbloqueado: ' + (b.name || b.phone || ''));
+        Store.blockedList = (Store.blockedList || []).filter(x => x.contactId !== b.contactId);
+        const c = Store.conversations.find(cv => String(cv.id) === String(b.conversationId));
+        if (c) c.blocked = false;
+        UI.renderList();
+      } catch (e) { UI.toast('No se pudo desbloquear: ' + e.message); }
+    },
+
     // ---------- bloquear / desbloquear contacto ----------
     // Bloqueado = Camila nunca le responde (todos los canales). El servidor espeja
     // el estado a Supabase (WhatsApp) y GHL (IG/FB/web).
@@ -638,6 +669,7 @@
         Store.renderLimit = 25;                 // reset de la paginación al cambiar de filtro
         UI.renderList();
         if (Store.filter === 'handoff') this.loadHandoff(true); // refresca al entrar
+        if (Store.filter === 'blocked') this.loadBlocked();      // trae la lista (incluye sin conversación)
       }));
       // auto-cargar más al llegar cerca del fondo de la lista (además del botón)
       const convBox = $('#convList');

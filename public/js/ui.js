@@ -109,11 +109,57 @@
       if (label) label.textContent = active ? 'Bot ON' : 'Bot OFF';
     },
 
+    // ---------- sección "Bloqueados" (con alta manual de números) ----------
+    renderBlockedView(box) {
+      box = box || $('#convList');
+      const items = Store.blockedList;
+      const addBar = `<div class="blk-add">
+          <input type="tel" id="blkNumber" class="blk-add__input" placeholder="Número a bloquear (ej. 8095551234)" autocomplete="off" />
+          <button id="blkAddBtn" class="blk-add__btn">Bloquear</button>
+        </div>
+        <p class="blk-hint">Bloquea un número antes de que escriba: Camila no le responderá.</p>`;
+      let empty = '';
+      if (items == null) empty = '<p class="blk-empty">Cargando…</p>';
+      else if (!items.length) empty = '<p class="blk-empty">No hay contactos bloqueados.</p>';
+      box.innerHTML = addBar + '<div class="blk-list" id="blkList">' + empty + '</div>';
+
+      const addBtn = $('#blkAddBtn'), input = $('#blkNumber');
+      if (addBtn) addBtn.addEventListener('click', () => global.App.blockNumber());
+      if (input) input.addEventListener('keydown', e => { if (e.key === 'Enter') global.App.blockNumber(); });
+
+      if (items && items.length) {
+        const listBox = $('#blkList');
+        const frag = document.createDocumentFragment();
+        items.forEach(b => {
+          const node = el('div', 'blk-row' + (b.hasConversation ? ' blk-row--conv' : ''));
+          node.innerHTML = `
+            <div class="avatar" style="background:${b.avatarColor}">${esc(b.avatarInitials)}</div>
+            <div class="blk-row__main">
+              <div class="blk-row__name">${esc(b.name)}</div>
+              <div class="blk-row__sub">${esc(b.phone || b.userId || '')}${b.hasConversation ? '' : ' · sin conversación'}</div>
+            </div>
+            <button class="blk-row__btn" title="Desbloquear">Desbloquear</button>`;
+          node.querySelector('.blk-row__btn').addEventListener('click', e => { e.stopPropagation(); global.App.unblockContact(b); });
+          if (b.hasConversation && b.conversationId) node.addEventListener('click', () => global.App.openConversation(b.conversationId));
+          frag.appendChild(node);
+        });
+        listBox.appendChild(frag);
+      }
+      // contador de la pestaña con el total real (incluye los sin conversación)
+      if (items != null) {
+        const cnt = $('#blockedCount');
+        if (cnt) cnt.textContent = items.length ? (items.length > 99 ? '99+' : String(items.length)) : '';
+        const tb = document.querySelector('.tab[data-filter="blocked"]');
+        if (tb) tb.classList.toggle('tab--has', items.length > 0);
+      }
+    },
+
     // ---------- lista de conversaciones ----------
     renderList() {
       const box = $('#convList');
-      const full = Store.visibleConversations();
       this.renderHandoffCount();          // siempre en sintonía con lo que hay en la lista
+      if (Store.filter === 'blocked') return this.renderBlockedView(box);
+      const full = Store.visibleConversations();
       if (!full.length) {
         box.innerHTML = '<div class="list__body-empty"><p style="padding:30px;text-align:center;color:#9aa3b2">Sin conversaciones</p></div>';
         return;
