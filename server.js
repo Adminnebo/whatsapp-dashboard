@@ -1590,6 +1590,11 @@ app.post('/api/tickets', conAdjuntos, wrap(async (req, res) => {
     : '';
 
   const payload = {
+    // Nuestro id de ticket: devuélvelo al completar (POST /api/tickets/webhook
+    // con { ticketId }). Así el gestor puede cerrar el ticket sin depender de
+    // que hayamos guardado su propio id.
+    ticketId: ticketId,
+    nebo_ticket_id: ticketId,
     title: asunto,
     description: desc + '\n\n— — —\n' + meta + bloqueAdj,
     priority: PRIORIDAD_PM[String(b.prioridad || '').toLowerCase()] || 'MEDIUM',
