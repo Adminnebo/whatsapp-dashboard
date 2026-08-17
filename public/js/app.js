@@ -261,6 +261,26 @@
       }
     },
 
+    // ---------- bloquear / desbloquear contacto ----------
+    // Bloqueado = Camila nunca le responde (todos los canales). El servidor espeja
+    // el estado a Supabase (WhatsApp) y GHL (IG/FB/web).
+    async toggleBlock() {
+      const c = Store.activeConversation(); if (!c) return;
+      const willBlock = !c.blocked;
+      if (willBlock && !confirm(`¿Bloquear a ${c.name}?\nCamila dejará de responderle en todos los canales. Podrás desbloquearlo cuando quieras.`)) return;
+      c.blocked = willBlock;                                  // optimista
+      UI.renderDetails(c); UI.renderList();
+      try {
+        await Api.blockSet(c.id, willBlock);
+        UI.toast(willBlock ? 'Contacto bloqueado · Camila no responderá' : 'Contacto desbloqueado');
+        if (window.Notifs) Notifs.load();
+      } catch (e) {
+        c.blocked = !willBlock;                              // revertir si falla
+        UI.renderDetails(c); UI.renderList();
+        UI.toast('No se pudo actualizar el bloqueo: ' + e.message);
+      }
+    },
+
     // ---------- eliminar conversación ----------
     async deleteConversation() {
       const conv = Store.activeConversation();
@@ -666,6 +686,9 @@
         // podría estar desfasado y el botón mandaría OFF cuando ya dice OFF.
         this.setStatus(Store.isHandoff(c) ? 'open' : 'closed');
       });
+      // bloquear / desbloquear contacto
+      const cb = $('#convBlock');
+      if (cb) cb.addEventListener('click', () => this.toggleBlock());
       // plantillas
       $('#btnTemplate').addEventListener('click', () => {
         $('#templateModal').hidden = false;

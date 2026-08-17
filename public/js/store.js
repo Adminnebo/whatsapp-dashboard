@@ -90,11 +90,14 @@
       if (!c) return false;
       return !!c.handoff || !!(c.contactId && this.handoffIds.has(c.contactId));
     },
+    // ¿Contacto bloqueado? (contacts.blocked; el bot nunca le responde).
+    isBlocked(c) { return !!(c && c.blocked); },
     visibleConversations() {
       const CANALES = ['whatsapp', 'instagram', 'facebook', 'pagina_web'];
       let list = this.conversations.slice();
       if (this.filter === 'unread')  list = list.filter(c => c.unreadCount > 0);
       if (this.filter === 'handoff') list = list.filter(c => this.isHandoff(c));
+      if (this.filter === 'blocked') list = list.filter(c => this.isBlocked(c));
       if (CANALES.includes(this.filter)) list = list.filter(c => (c.channel || 'whatsapp') === this.filter);
       if (this.search) {
         const q = this.search.toLowerCase();

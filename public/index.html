@@ -105,6 +105,10 @@
             <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
             <span class="tab__count" id="handoffCount"></span>
           </button>
+          <button class="tab tab--blocked" data-filter="blocked" title="Bloqueados" aria-label="Bloqueados">
+            <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2c1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.96 7.96 0 0 1 4 12a8 8 0 0 1 8-8zm0 16a7.96 7.96 0 0 1-4.9-1.69L18.31 7.1A7.96 7.96 0 0 1 20 12a8 8 0 0 1-8 8z"/></svg>
+            <span class="tab__count" id="blockedCount"></span>
+          </button>
         </div>
       </header>
       <div id="convList" class="list__body"><!-- conversaciones inyectadas --></div>
@@ -192,6 +196,10 @@
         <button id="convToggle" class="pill-toggle pill-toggle--on" title="Encender / apagar a Camila para este contacto (apagar = handoff, la conversación pasa a manual)" data-perm="inbox.camila">
           <span class="pill-toggle__dot"></span>
           <span id="convToggleLabel">CAMILA ON</span>
+        </button>
+        <button id="convBlock" class="pill-toggle pill-toggle--blockbtn" title="Bloquear: Camila nunca le responderá (todos los canales)" data-perm="inbox.camila">
+          <svg viewBox="0 0 24 24" width="13" height="13" style="vertical-align:-2px"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2c1.85 0 3.55.63 4.9 1.69L5.69 16.9A7.96 7.96 0 0 1 4 12a8 8 0 0 1 8-8zm0 16a7.96 7.96 0 0 1-4.9-1.69L18.31 7.1A7.96 7.96 0 0 1 20 12a8 8 0 0 1-8 8z"/></svg>
+          <span id="convBlockLabel">Bloquear</span>
         </button>
         <div class="details__phone" id="detPhone">--</div>
         <div class="details__quick">

@@ -131,6 +131,13 @@
       return await http(S().botSetUrl, { method: 'POST', headers: headers(), body: JSON.stringify({ active: !!active }) });
     },
 
+    // Bloquear/desbloquear un contacto: Camila deja de responderle (todos los
+    // canales). Se resuelve por conversationId en el servidor.
+    async blockSet(conversationId, blocked) {
+      const url = S().blockSetUrl || '/api/block-set';
+      return await http(url, { method: 'POST', headers: headers(), body: JSON.stringify({ conversationId, blocked: !!blocked }) });
+    },
+
     // ---------------------------------------------------------------
     // Auto-return de handoff: minutos tras los cuales Camila se reactiva
     // sola en un chat en handoff. 0 = desactivado. Se guarda en el servidor.

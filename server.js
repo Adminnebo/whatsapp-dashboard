@@ -371,6 +371,10 @@ CREATE TABLE IF NOT EXISTS wa_devices (
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff BOOLEAN DEFAULT false;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_at TIMESTAMPTZ;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_stopped BOOLEAN DEFAULT false;
+-- Bloqueo de contacto: el bot NUNCA responde (todos los canales). Distinto del
+-- handoff (temporal, humano): esto es una lista de bloqueo deliberada.
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS blocked BOOLEAN DEFAULT false;
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS blocked_at TIMESTAMPTZ;
 CREATE TABLE IF NOT EXISTS notifications (id BIGSERIAL PRIMARY KEY, type TEXT NOT NULL, contact_id TEXT, conversation_id BIGINT, title TEXT NOT NULL, body TEXT, ref_id TEXT, created_at TIMESTAMPTZ DEFAULT now());
 CREATE UNIQUE INDEX IF NOT EXISTS uq_notifications_ref ON notifications(type, ref_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
@@ -733,7 +737,7 @@ app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res)
   if (todos) filtro = '';
   else if (device) { params.push(device); filtro = 'WHERE conv.device_id = $1'; }
 
-  const r = await q(`SELECT conv.id, c.ghl_contact_id, c.user_id, c.name, c.phone, c.email, c.company, c.tags, c.source, c.owner, c.handoff,
+  const r = await q(`SELECT conv.id, c.ghl_contact_id, c.user_id, c.name, c.phone, c.email, c.company, c.tags, c.source, c.owner, c.handoff, c.blocked,
       conv.channel, conv.status, conv.starred, conv.unread_count, conv.last_message, conv.last_direction, conv.last_status, conv.device_id,
       EXTRACT(EPOCH FROM conv.last_message_at)*1000 AS last_message_at, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
       FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
@@ -749,7 +753,7 @@ app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res)
       lastMessage: row.last_message || '', lastMessageAt: Number(row.last_message_at) || 0,
       lastDirection: row.last_direction || 'in', lastStatus: row.last_status || 'received',
       unreadCount: Number(row.unread_count) || 0, starred: !!row.starred, status: row.status || 'open',
-      lastInbound: Number(row.last_inbound) || 0, handoff: !!row.handoff,
+      lastInbound: Number(row.last_inbound) || 0, handoff: !!row.handoff, blocked: !!row.blocked,
       deviceId: row.device_id || null,
       contact: { email: row.email || '', company: row.company || '', tags: row.tags || [], source: row.source || '', owner: row.owner || '' }
     };
@@ -1046,10 +1050,10 @@ app.get('/api/bot-status', wrap(async (req, res) => {
   const id = String(req.query.contactId || req.query.user_id || req.query.userId || req.query.phone || '').trim();
   const botActive = await getFlag();
 
-  let handoff = false, conversationOpen = true, lastInboundAt = null, found = false;
+  let handoff = false, blocked = false, conversationOpen = true, lastInboundAt = null, found = false;
   if (id) {
     const r = await q(
-      `SELECT c.handoff, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
+      `SELECT c.handoff, c.blocked, EXTRACT(EPOCH FROM conv.last_inbound)*1000 AS last_inbound
        FROM contacts c
        LEFT JOIN conversations conv ON conv.contact_id = c.id
        WHERE c.ghl_contact_id = $1 OR c.user_id = $1 OR c.phone = $1
@@ -1057,14 +1061,15 @@ app.get('/api/bot-status', wrap(async (req, res) => {
     if (r.rows.length) {
       found = true;
       handoff = !!r.rows[0].handoff;
+      blocked = !!r.rows[0].blocked;
       if (r.rows[0].last_inbound != null) lastInboundAt = Number(r.rows[0].last_inbound);
     }
   }
 
   conversationOpen = !handoff;   // handoff = conversación en manual (bot detenido)
   const withinWindow = lastInboundAt != null ? (Date.now() - lastInboundAt) < 24 * 3600 * 1000 : true;
-  const shouldReply = botActive && !handoff;
-  res.json({ ok: true, contactId: id || null, found, botActive, handoff, conversationOpen, lastInboundAt, withinWindow, shouldReply });
+  const shouldReply = botActive && !handoff && !blocked;   // bloqueado = el bot nunca responde
+  res.json({ ok: true, contactId: id || null, found, botActive, handoff, blocked, conversationOpen, lastInboundAt, withinWindow, shouldReply });
 }));
 
 // ---- GHL ----
@@ -1241,13 +1246,13 @@ app.post('/api/handoff-set', wrap(async (req, res) => {
   // Resolver el contacto + su conversación más reciente.
   let row;
   if (convId) {
-    const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id, cv.id AS conv_id
+    const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id, c.blocked, cv.id AS conv_id
                        FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
                        WHERE cv.id = $1::bigint LIMIT 1`, [convId]);
     row = r.rows[0];
   } else {
     // El id externo (ext) puede vivir en ghl_contact_id, user_id o phone.
-    const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id,
+    const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id, c.blocked,
                          (SELECT id FROM conversations WHERE contact_id = c.id ORDER BY updated_at DESC LIMIT 1) AS conv_id
                        FROM contacts c
                        WHERE ($1::text IS NOT NULL AND (c.ghl_contact_id = $1::text OR c.user_id = $1::text OR c.phone = $1::text))
@@ -1277,7 +1282,8 @@ app.post('/api/handoff-set', wrap(async (req, res) => {
     await mirrorBotActive({ phone: sbPhone, userId: sbUser, active: false });
   } else {
     await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [row.id]);
-    await mirrorBotActive({ phone: sbPhone, userId: sbUser, active: true });
+    // Reactivar el bot SOLO si el contacto no está bloqueado (el bloqueo manda).
+    await mirrorBotActive({ phone: sbPhone, userId: sbUser, active: !row.blocked });
   }
   await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
            VALUES ($1, 'Agente (bot)', $2, $3)`,
@@ -1290,6 +1296,76 @@ app.post('/api/handoff-set', wrap(async (req, res) => {
     conversationId: row.conv_id ? String(row.conv_id) : null,
     name: row.name, phone: row.phone, userId: row.user_id
   });
+}));
+
+// Bloquear/desbloquear un contacto: el bot NUNCA le responde (todos los canales).
+// Es una lista de bloqueo deliberada, aparte del handoff (humano temporal). El
+// "bot activo" real de un contacto = !handoff && !blocked; ese estado se espeja a
+// Supabase (bot_active, WhatsApp) y a GHL (bot_status, IG/FB/web, best-effort).
+app.post('/api/block-set', need('inbox.conversations'), wrap(async (req, res) => {
+  const b = req.body || {};
+  const block = b.blocked != null ? asBool(b.blocked) : !asBool(b.unblock);   // por defecto: bloquear
+  const convId = String(b.conversationId || b.conversation_id || '').replace(/[^0-9]/g, '');
+  const ext = [b.userId, b.user_id, b.ghl_contact_id, b.contactId, b.contact_id, b.id]
+    .map(v => (v == null ? '' : String(v).trim())).find(v => v !== '') || null;
+  const phoneIn = (b.phone || b.number) ? (String(b.phone || b.number).replace(/[^\d]/g, '') || null) : null;
+  if (!convId && !ext && !phoneIn) return res.status(400).json({ error: 'Falta conversationId, id (user_id/phone) o phone' });
+
+  let row;
+  if (convId) {
+    const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id, c.handoff, cv.id AS conv_id
+                       FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
+                       WHERE cv.id = $1::bigint LIMIT 1`, [convId]);
+    row = r.rows[0];
+  } else {
+    const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id, c.handoff,
+                         (SELECT id FROM conversations WHERE contact_id = c.id ORDER BY updated_at DESC LIMIT 1) AS conv_id
+                       FROM contacts c
+                       WHERE ($1::text IS NOT NULL AND (c.ghl_contact_id = $1::text OR c.user_id = $1::text OR c.phone = $1::text))
+                          OR ($2::text IS NOT NULL AND c.phone = $2::text)
+                       ORDER BY CASE WHEN c.ghl_contact_id = $1::text THEN 0
+                                     WHEN c.user_id        = $1::text THEN 1 ELSE 2 END LIMIT 1`, [ext, phoneIn]);
+    row = r.rows[0];
+  }
+  if (!row) return res.status(404).json({ error: 'Contacto no encontrado' });
+
+  // Bot activo para ESTE contacto tras el cambio: solo si !handoff && !blocked.
+  const botOn = !row.handoff && !block;
+  await q(`UPDATE contacts SET blocked = $2, blocked_at = CASE WHEN $2 THEN COALESCE(blocked_at, now()) ELSE NULL END WHERE id = $1`, [row.id, block]);
+
+  const esMeta = v => /^[A-Za-z]{2}\.\d+$/.test(v || '');
+  const esTel  = v => /^\+?\d{6,}$/.test(v || '');
+  const sbUser = row.user_id || (esMeta(row.ghl_contact_id) ? row.ghl_contact_id : (esMeta(ext) ? ext : null));
+  const sbPhone = row.phone || (esTel(row.ghl_contact_id) ? row.ghl_contact_id : phoneIn);
+  await mirrorBotActive({ phone: sbPhone, userId: sbUser, active: botOn });
+  if (row.ghl_contact_id) { try { await setBotStatus(row.ghl_contact_id, botOn ? '' : 'STOP'); } catch (e) { console.error('block-set GHL', e.message); } }
+
+  await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
+           VALUES ($1, 'Agente (bot)', $2, $3)`,
+    [block ? 'contact_block' : 'contact_unblock', row.ghl_contact_id,
+     block ? ('Contacto bloqueado' + (b.reason ? ': ' + String(b.reason).slice(0, 140) : '')) : 'Contacto desbloqueado']);
+
+  res.json({ ok: true, blocked: block, contactId: String(row.id),
+    conversationId: row.conv_id ? String(row.conv_id) : null,
+    name: row.name, phone: row.phone, userId: row.user_id });
+}));
+
+// Lista de contactos bloqueados (para la sección "Bloqueados" del inbox).
+app.get('/api/blocked', need('inbox.conversations'), wrap(async (_req, res) => {
+  const r = await q(`SELECT c.id, c.ghl_contact_id, c.user_id, c.name, c.phone, c.blocked_at,
+      cv.id AS conv_id, cv.channel,
+      EXTRACT(EPOCH FROM cv.last_message_at)*1000 AS last_message_at, cv.last_message
+      FROM contacts c
+      LEFT JOIN conversations cv ON cv.contact_id = c.id
+      WHERE c.blocked = true
+      ORDER BY c.blocked_at DESC NULLS LAST`);
+  res.json({ blocked: r.rows.map(x => ({
+    contactId: String(x.id), conversationId: x.conv_id ? String(x.conv_id) : null,
+    userId: x.user_id || null, name: x.name || x.phone || x.user_id || x.ghl_contact_id || '?',
+    phone: x.phone || null, channel: x.channel || 'whatsapp',
+    blockedAt: x.blocked_at || null, lastMessage: x.last_message || '',
+    lastMessageAt: Number(x.last_message_at) || 0
+  })) });
 }));
 
 // ---- notificaciones ----

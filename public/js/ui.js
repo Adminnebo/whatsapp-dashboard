@@ -94,6 +94,7 @@
       };
       marca('handoff', convs.filter(c => Store.isHandoff(c)).length, 'handoffCount');
       marca('unread', convs.filter(c => c.unreadCount > 0).length, 'unreadCount');
+      marca('blocked', convs.filter(c => Store.isBlocked(c)).length, 'blockedCount');
     },
 
     // ---------- botón prender/apagar chatbot ----------
@@ -126,7 +127,8 @@
         const active = c.id === Store.activeId;
         const cm = chMeta(c.channel);
         const handoff = Store.isHandoff(c);
-        const node = el('div', 'conv' + (active ? ' conv--active' : '') + (c.unreadCount > 0 ? ' conv--unread' : '') + (handoff ? ' conv--handoff' : ''));
+        const blocked = Store.isBlocked(c);
+        const node = el('div', 'conv' + (active ? ' conv--active' : '') + (c.unreadCount > 0 ? ' conv--unread' : '') + (handoff ? ' conv--handoff' : '') + (blocked ? ' conv--blocked' : ''));
         const tick = c.lastDirection === 'out' ? `<span class="tick ${c.lastStatus === 'read' ? 'read' : ''}">${TICK[c.lastStatus] || TICK.sent}</span> ` : '';
         node.innerHTML = `
           <div class="conv__avatar">
@@ -139,6 +141,7 @@
               <span class="conv__time">${relList(c.lastMessageAt)}</span>
             </div>
             <div class="conv__bottom">
+              ${blocked ? '<span class="conv__blocked">Bloqueado</span>' : ''}
               ${handoff ? '<span class="conv__handoff">Handoff</span>' : ''}
               <span class="conv__preview">${tick}${esc(c.lastMessage)}</span>
               ${c.unreadCount > 0 ? `<span class="conv__badge">${c.unreadCount}</span>` : ''}
@@ -400,6 +403,15 @@
         ct.classList.toggle('pill-toggle--off', closed);
         ct.classList.toggle('pill-toggle--on', !closed);
         if (ctl) ctl.textContent = closed ? 'CAMILA OFF' : 'CAMILA ON';
+      }
+      // Botón de bloqueo del contacto.
+      const cb = $('#convBlock'), cbl = $('#convBlockLabel');
+      if (cb) {
+        const blocked = Store.isBlocked(conv);
+        cb.classList.toggle('pill-toggle--blocked', blocked);
+        if (cbl) cbl.textContent = blocked ? 'Desbloquear' : 'Bloquear';
+        cb.title = blocked ? 'Desbloquear: Camila podrá volver a responderle'
+                           : 'Bloquear: Camila nunca le responderá (todos los canales)';
       }
     },
 

@@ -791,3 +791,24 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tkdet__img { display: block; aspect-ratio: 1; border-radius: 9px; overflow: hidden; border: 1px solid var(--border); }
 .tkdet__img img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tkdet__img:hover { border-color: var(--brand); }
+
+/* ── Bloqueo de contactos ─────────────────────────────────────────────────── */
+.conv__blocked { display:inline-block; font-size:11px; font-weight:700; padding:1px 7px; border-radius:999px; background:#e5e7eb; color:#374151; margin-right:6px; }
+[data-theme="dark"] .conv__blocked { background:#374151; color:#e5e7eb; }
+.conv--blocked .conv__name { color:#6b7280; text-decoration:line-through; text-decoration-thickness:1px; }
+[data-theme="dark"] .conv--blocked .conv__name { color:#9ca3af; }
+.tab--blocked.tab--has { color:#4b5563; opacity:1; }
+.tab--blocked.tab--has .tab__count { background:#4b5563; }
+.tab--blocked.tab--active { border-color:#4b5563; color:#4b5563; }
+[data-theme="dark"] .tab--blocked.tab--has { color:#9ca3af; }
+[data-theme="dark"] .tab--blocked.tab--active { border-color:#9ca3af; color:#9ca3af; }
+
+/* Botón Bloquear/Desbloquear en el header del contacto */
+#convBlock { margin-top:6px; }
+.pill-toggle--blockbtn { background:#eef1f4; color:#4b5563; }
+.pill-toggle--blockbtn:hover { background:#e2e6ea; }
+.pill-toggle--blocked { background:#374151; color:#fff; }
+.pill-toggle--blocked:hover { background:#1f2937; }
+[data-theme="dark"] .pill-toggle--blockbtn { background:#2a2f3a; color:#cbd5e1; }
+[data-theme="dark"] .pill-toggle--blockbtn:hover { background:#333a47; }
+[data-theme="dark"] .pill-toggle--blocked { background:#b91c1c; color:#fff; }
