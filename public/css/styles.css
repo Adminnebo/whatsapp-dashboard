@@ -79,10 +79,12 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 /* ============ SHELL ============ */
 .app {
   display: grid;
-  grid-template-columns: 64px 340px 1fr 320px;
+  /* Panel de detalles oculto: Camila/Bloquear viven en el header del chat. */
+  grid-template-columns: 64px 340px 1fr;
   height: 100vh;
   overflow: hidden;
 }
+.details { display: none !important; }   /* panel lateral de detalles oculto */
 
 /* ============ RAIL ============ */
 .rail {

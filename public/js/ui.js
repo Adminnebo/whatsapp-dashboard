@@ -212,7 +212,8 @@
       const conv = Store.activeConversation();
       const empty = $('#threadEmpty'), inner = $('#threadInner'), details = $('#details');
       if (!conv) { empty.hidden = false; inner.hidden = true; details.hidden = true; return; }
-      empty.hidden = true; inner.hidden = false; details.hidden = false;
+      empty.hidden = true; inner.hidden = false;
+      details.hidden = true;   // panel lateral de detalles oculto: Camila/Bloquear van en el header
 
       // cabecera
       $('#threadAvatar').textContent = conv.avatar.initials;
