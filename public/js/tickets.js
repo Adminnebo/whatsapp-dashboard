@@ -86,6 +86,7 @@
         const d = await (await fetch(url, { headers: h })).json();
         this._tickets = d.tickets || [];
         this._admin = !!d.admin;
+        this._super = !!d.super;
         this.pintarLista();
       } catch (e) {
         box.innerHTML = `<p class="tk__err">No se pudieron cargar: ${esc(e.message)}</p>`;
@@ -179,6 +180,23 @@
       this.pintarItems();
     },
 
+    // Cambiar la categoría de un ticket ya creado (solo super_admin; el backend
+    // lo valida). Actualiza en memoria para no recargar todo.
+    async cambiarCategoria(id, category) {
+      const h = { 'Content-Type': 'application/json' };
+      if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
+      try {
+        const r = await fetch('/api/tickets/' + encodeURIComponent(id), { method: 'PATCH', headers: h, body: JSON.stringify({ category }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) t.category = d.category;
+        if (global.UI && UI.toast) UI.toast('Categoría actualizada');
+      } catch (e) {
+        if (global.UI && UI.toast) UI.toast('No se pudo cambiar la categoría: ' + e.message);
+      }
+    },
+
     // Ficha de un ticket: descripción completa, badges, adjuntos con miniatura.
     abrirDetalle(id) {
       const t = this._tickets.find(x => String(x.id) === String(id));
@@ -194,7 +212,9 @@
           <div class="tkdet__badges">
             <span class="tkitem__est tkitem__est--${cls}">${et}</span>
             <span class="tkbadge tkbadge--${pr}">${esc(PRI[pr] || pr)}</span>
-            ${t.category ? `<span class="tkbadge">${esc(t.category)}</span>` : ''}
+            ${this._super
+              ? `<select class="tkbadge tkcat-sel" data-tkcat="${esc(t.id)}" title="Cambiar categoría (super admin)">${CATEGORIAS.map(c => `<option value="${esc(c)}"${c === t.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}${(t.category && !CATEGORIAS.includes(t.category)) ? `<option value="${esc(t.category)}" selected>${esc(t.category)}</option>` : ''}</select>`
+              : (t.category ? `<span class="tkbadge">${esc(t.category)}</span>` : '')}
           </div>
           <div class="tkdet__meta">Creado ${fechaLarga(t.createdAt)}${this._admin && t.userEmail ? ' · por ' + esc(t.userEmail) : ''}${t.completedAt ? ' · Resuelto ' + fechaLarga(t.completedAt) : ''}</div>
           ${(t.affectedConversation || t.affectedPhone) ? `<div class="tkdet__meta">💬 Conversación afectada: ${esc(t.affectedConversation || '—')}${t.affectedPhone ? ' · 📞 ' + esc(t.affectedPhone) : ''}</div>` : ''}
@@ -374,6 +394,8 @@
       });
       // Selects de filtro (prioridad / categoría / fecha / orden).
       modal.addEventListener('change', e => {
+        const catSel = e.target.closest('[data-tkcat]');
+        if (catSel) return this.cambiarCategoria(catSel.dataset.tkcat, catSel.value);
         const map = { tkPrio: '_prio', tkCat: '_cat', tkDias: '_dias', tkOrden: '_orden' };
         const k = map[e.target.id];
         if (k) { this[k] = e.target.value; this.pintarItems(); }

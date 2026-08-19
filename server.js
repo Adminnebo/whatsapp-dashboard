@@ -97,12 +97,13 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 64 
 
 // ── Autenticación (Supabase) — módulo reutilizable en auth/ ──────────────────
 const authRouter = require('./auth/router');
-const { requireAuth, requireAdmin, requirePlatform, requirePermission } = require('./auth/middleware');
+const { requireAuth, requireAdmin, requireSuperAdmin, requirePlatform, requirePermission } = require('./auth/middleware');
 // Atajo: gate de permiso que NO rompe si la auth está desactivada (sin Supabase).
 const need = key => (req, res, next) => (!authConfigured || !req.user) ? next() : requirePermission(key)(req, res, next);
 // Igual que need pero exige rol admin/super_admin (no un permiso). Para acciones
 // que solo un administrador puede hacer, p.ej. prender/apagar el bot global.
 const needAdmin = (req, res, next) => (!authConfigured || !req.user) ? next() : requireAdmin(req, res, next);
+const needSuper = (req, res, next) => (!authConfigured || !req.user) ? next() : requireSuperAdmin(req, res, next);
 const { configured: authConfigured, getProfile } = require('./auth/supabase');
 // Nombre del agente logueado (para sent_by). Null si no hay sesión.
 async function agentName(req) {
@@ -1725,7 +1726,7 @@ app.get('/api/tickets', wrap(async (req, res) => {
     }
   }
 
-  res.json({ ok: true, admin: !!esAdmin, scope: verTodos ? 'all' : 'mine', tickets: r.rows.map(t => ({
+  res.json({ ok: true, admin: !!esAdmin, super: !!(prof && prof.role === 'super_admin'), scope: verTodos ? 'all' : 'mine', tickets: r.rows.map(t => ({
     id: String(t.id), title: t.title, description: t.description, priority: t.priority, category: t.category,
     status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name,
     affectedPhone: t.affected_phone || null, affectedConversation: t.affected_conversation || null,
@@ -1733,6 +1734,21 @@ app.get('/api/tickets', wrap(async (req, res) => {
     files: porTicket.get(String(t.id)) || [],
     comments: porComentario.get(String(t.id)) || []
   })) });
+}));
+
+// Editar un ticket ya creado (categoría / prioridad). SOLO super_admin.
+app.patch('/api/tickets/:id', needSuper, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Id inválido' });
+  const b = req.body || {};
+  const sets = [], vals = [id];
+  if (b.category !== undefined) { vals.push(b.category == null ? null : String(b.category).slice(0, 60)); sets.push(`category = $${vals.length}`); }
+  if (b.priority !== undefined) { vals.push(b.priority == null ? null : String(b.priority).slice(0, 40)); sets.push(`priority = $${vals.length}`); }
+  if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar (category / priority)' });
+  sets.push('updated_at = now()');
+  const r = await q(`UPDATE tickets SET ${sets.join(', ')} WHERE id = $1 RETURNING id, category, priority`, vals);
+  if (!r.rows[0]) return res.status(404).json({ error: 'Ticket no encontrado' });
+  res.json({ ok: true, id: String(r.rows[0].id), category: r.rows[0].category, priority: r.rows[0].priority });
 }));
 
 // ── Listado de tickets para sistemas externos (API key fija, sin sesión) ─────
