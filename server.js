@@ -136,7 +136,7 @@ app.use('/api/auth', authRouter);
 // Endpoints de máquina (n8n / bot) que NO requieren sesión de usuario:
 // (/media va abierta: la protege la firma HMAC — <img>/<audio> y Meta no mandan headers)
 // (/tickets/file igual: la abre el gestor de tareas desde fuera, con la firma en la URL)
-const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/tickets/list', '/ghl/contact', '/contact', '/handoff-set']);
+const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/tickets/list', '/tickets/comment', '/ghl/contact', '/contact', '/handoff-set']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
 const SIN_PLATAFORMA = new Set(['/tickets']);
@@ -401,6 +401,17 @@ CREATE INDEX IF NOT EXISTS idx_tickets_ext ON tickets(external_id);
 -- Conversación afectada por el ticket (teléfono + nombre del contacto).
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS affected_phone TEXT;
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS affected_conversation TEXT;
+-- Comentarios / respuestas de un ticket (del equipo de soporte, vía API).
+CREATE TABLE IF NOT EXISTS ticket_comments (
+  id BIGSERIAL PRIMARY KEY,
+  ticket_id BIGINT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author TEXT,
+  author_email TEXT,
+  body TEXT NOT NULL,
+  source TEXT,                                -- 'api' | 'interfaz'
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_comments ON ticket_comments(ticket_id, created_at);
 -- Adjuntos de un ticket (capturas, PDFs…). Igual que los mensajes: el binario vive
 -- en la base, y se sirve por una URL firmada para que el gestor de tareas lo abra.
 CREATE TABLE IF NOT EXISTS ticket_files (
@@ -1698,12 +1709,29 @@ app.get('/api/tickets', wrap(async (req, res) => {
     }
   }
 
+  // Comentarios / respuestas de esos tickets.
+  const porComentario = new Map();
+  if (ids.length) {
+    const rc = await q(
+      `SELECT id, ticket_id, author, author_email, body, source, EXTRACT(EPOCH FROM created_at)*1000 AS created_at
+       FROM ticket_comments WHERE ticket_id = ANY($1::bigint[]) ORDER BY created_at`, [ids]);
+    for (const cm of rc.rows) {
+      const k = String(cm.ticket_id);
+      if (!porComentario.has(k)) porComentario.set(k, []);
+      porComentario.get(k).push({
+        id: String(cm.id), author: cm.author || null, authorEmail: cm.author_email || null,
+        body: cm.body || '', source: cm.source || null, createdAt: Number(cm.created_at) || 0
+      });
+    }
+  }
+
   res.json({ ok: true, admin: !!esAdmin, scope: verTodos ? 'all' : 'mine', tickets: r.rows.map(t => ({
     id: String(t.id), title: t.title, description: t.description, priority: t.priority, category: t.category,
     status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name,
     affectedPhone: t.affected_phone || null, affectedConversation: t.affected_conversation || null,
     createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null,
-    files: porTicket.get(String(t.id)) || []
+    files: porTicket.get(String(t.id)) || [],
+    comments: porComentario.get(String(t.id)) || []
   })) });
 }));
 
@@ -1815,6 +1843,50 @@ app.post('/api/tickets/webhook', wrap(async (req, res) => {
     });
   }
   res.json({ ok: true, id: String(t.id), status: t.status, completado });
+}));
+
+// ── Comentario / respuesta a un ticket vía API ──────────────────────────────
+// Lo usa el gestor de tareas para responderle al solicitante. Mismo secreto que
+// el webhook (TICKETS_WEBHOOK_SECRET), por X-Webhook-Secret / X-Api-Key / Bearer
+// / ?secret= / body. Guarda el comentario y notifica al autor del ticket.
+app.post('/api/tickets/comment', wrap(async (req, res) => {
+  const b = req.body || {};
+  const bearer = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  const secret = req.get('x-webhook-secret') || req.get('x-api-key') || bearer || req.query.secret || b.secret || '';
+  if (!TICKETS_WEBHOOK_SECRET) return res.status(503).json({ error: 'Comentarios sin configurar (falta TICKETS_WEBHOOK_SECRET)' });
+  if (secret !== TICKETS_WEBHOOK_SECRET) return res.status(401).json({ error: 'Secreto inválido' });
+
+  const externalId = String(buscarCampo(b, ['taskId', 'external_id', 'externalId', 'id', 'task_id']) || '').trim();
+  const ticketId = String(buscarCampo(b, ['ticketId', 'nebo_ticket_id']) || '').trim();
+  if (!externalId && !ticketId) return res.status(400).json({ error: 'Falta el id del ticket (ticketId o taskId)' });
+
+  const body = String(buscarCampo(b, ['comment', 'comentario', 'body', 'text', 'message', 'respuesta', 'reply']) || '').trim();
+  if (!body) return res.status(400).json({ error: 'Falta el comentario (comment / body / text)' });
+  const author = (String(buscarCampo(b, ['author', 'autor', 'name', 'agent', 'from']) || 'Soporte').trim() || 'Soporte').slice(0, 120);
+  const authorEmail = String(buscarCampo(b, ['authorEmail', 'email']) || '').trim().slice(0, 160) || null;
+
+  const tk = await q(`SELECT id, title, user_id FROM tickets
+     WHERE ($1 <> '' AND external_id = $1) OR ($2 <> '' AND id::text = $2) LIMIT 1`, [externalId, ticketId]);
+  const t = tk.rows[0];
+  if (!t) return res.status(404).json({ error: 'No encontramos un ticket con ese id', taskId: externalId || ticketId });
+
+  const ins = await q(
+    `INSERT INTO ticket_comments (ticket_id, author, author_email, body, source)
+     VALUES ($1,$2,$3,$4,'api') RETURNING id, EXTRACT(EPOCH FROM created_at)*1000 AS created_at`,
+    [t.id, author, authorEmail, body.slice(0, 4000)]);
+  const cid = ins.rows[0].id;
+  await q(`UPDATE tickets SET updated_at = now() WHERE id = $1`, [t.id]);
+
+  // Notifica al autor del ticket que hay una respuesta nueva.
+  if (t.user_id) {
+    await notify({
+      type: 'ticket', userId: t.user_id,
+      title: '💬 Respondieron tu ticket',
+      body: author + ': ' + (body.length > 140 ? body.slice(0, 140) + '…' : body),
+      refId: 'ticket-comment-' + cid
+    });
+  }
+  res.json({ ok: true, id: String(cid), ticketId: String(t.id), createdAt: Number(ins.rows[0].created_at) || 0 });
 }));
 
 // Envía una plantilla aprobada. Es lo ÚNICO que Meta deja mandar fuera de la
