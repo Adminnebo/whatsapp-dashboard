@@ -158,6 +158,7 @@
         const [et, cls] = EST[t.status] || ['—', 'nuevo'];
         const pr = t.priority || 'media';
         const nAdj = (t.files || []).length;
+        const nCom = (t.comments || []).length;
         return `<button class="tkrow" data-tkid="${esc(t.id)}">
           <span class="tkrow__pri tkrow__pri--${pr}" title="${PRI[pr] || pr}"></span>
           <span class="tkrow__main">
@@ -165,7 +166,7 @@
               <span class="tkrow__title">${esc(t.title)}</span>
               <span class="tkitem__est tkitem__est--${cls}">${et}</span>
             </span>
-            <span class="tkrow__meta">${esc(PRI[pr] || pr)}${t.category ? ' · ' + esc(t.category) : ''} · ${fechaCorta(t.createdAt)}${this._admin && t.userEmail ? ' · ' + esc(t.userEmail) : ''}${nAdj ? ' · 📎 ' + nAdj : ''}</span>
+            <span class="tkrow__meta">${esc(PRI[pr] || pr)}${t.category ? ' · ' + esc(t.category) : ''} · ${fechaCorta(t.createdAt)}${this._admin && t.userEmail ? ' · ' + esc(t.userEmail) : ''}${nAdj ? ' · 📎 ' + nAdj : ''}${nCom ? ' · 💬 ' + nCom : ''}</span>
           </span>
           <span class="tkrow__go">›</span>
         </button>`;
@@ -200,6 +201,12 @@
           <div class="tkdet__desc">${esc(t.description || '—').replace(/\n/g, '<br>')}</div>
           ${imgs.length ? `<div class="tkdet__sec">Capturas</div><div class="tkdet__imgs">${imgs.map(f => `<a class="tkdet__img" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name)}"><img src="${esc(f.url)}" alt="${esc(f.name)}" loading="lazy" /></a>`).join('')}</div>` : ''}
           ${otros.length ? `<div class="tkdet__sec">Adjuntos</div><div class="tkitem__adjs">${otros.map(f => `<a class="tkitem__adj" href="${esc(f.url)}" target="_blank" rel="noopener">${iconoDe(f.mime)} ${esc(f.name)}</a>`).join('')}</div>` : ''}
+          ${(t.comments && t.comments.length) ? `<div class="tkdet__sec">Respuestas (${t.comments.length})</div>
+            <div class="tkcoms">${t.comments.map(cm => `
+              <div class="tkcom">
+                <div class="tkcom__h">💬 ${esc(cm.author || 'Soporte')} · ${fechaCorta(cm.createdAt)}</div>
+                <div class="tkcom__b">${esc(cm.body || '').replace(/\n/g, '<br>')}</div>
+              </div>`).join('')}</div>` : ''}
         </div>`;
     },
 
