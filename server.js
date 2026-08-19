@@ -573,7 +573,10 @@ WITH existing AS (SELECT id FROM contacts
 upd AS (UPDATE contacts SET
     ghl_contact_id = COALESCE(contacts.ghl_contact_id, $1),
     user_id        = COALESCE(contacts.user_id, $27),
-    name           = COALESCE($2, contacts.name),
+    -- Preservar el nombre YA guardado: se fija con el primer mensaje y NO se
+    -- pisa con el nombre de perfil de cada entrante (así un renombre manual
+    -- persiste y el nombre no "brinca" en cada mensaje).
+    name           = COALESCE(contacts.name, $2),
     phone          = COALESCE($9, contacts.phone),
     updated_at     = now()
   WHERE id = (SELECT id FROM existing) RETURNING id),
