@@ -19,7 +19,7 @@
     { v: 'alta', t: 'Alta' },
     { v: 'urgente', t: 'Urgente' }
   ];
-  const CATEGORIAS = ['Error / falla', 'Solicitud', 'Duda', 'Facturación', 'Otro'];
+  const CATEGORIAS = ['Error / falla', 'Solicitud', 'Nuevo desarrollo', 'Duda', 'Facturación', 'Otro'];
 
   const MAX_ARCHIVOS = 5;
   const MAX_BYTES = 10 * 1024 * 1024;
