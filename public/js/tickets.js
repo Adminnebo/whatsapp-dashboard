@@ -25,6 +25,13 @@
   const MAX_BYTES = 10 * 1024 * 1024;
   const peso = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
   const iconoDe = m => /^image\//.test(m || '') ? '🖼️' : /pdf/.test(m || '') ? '📕' : /^video\//.test(m || '') ? '🎬' : /^audio\//.test(m || '') ? '🎵' : '📎';
+  // Estrellas de calificación. editable=true → clicables (para el autor).
+  const estrellasHtml = (rating, editable, id) => {
+    const r = Number(rating) || 0;
+    let s = `<div class="tkstars${editable ? ' tkstars--edit' : ''}"${editable ? ` data-tkrate="${esc(id)}"` : ''}>`;
+    for (let i = 1; i <= 5; i++) s += `<span class="tkstar${i <= r ? ' tkstar--on' : ''}"${editable ? ` data-star="${i}"` : ''}>★</span>`;
+    return s + '</div>';
+  };
   const esImagen = m => /^image\//.test(m || '');
 
   // Estado (etiqueta + clase), prioridad (etiqueta) y fechas — compartidos por lista y detalle.
@@ -197,6 +204,23 @@
       }
     },
 
+    // Calificación (1–5) de la resolución. Solo la puede poner quien creó el ticket.
+    async calificar(id, rating) {
+      const h = { 'Content-Type': 'application/json' };
+      if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
+      try {
+        const r = await fetch('/api/tickets/rate', { method: 'POST', headers: h, body: JSON.stringify({ ticketId: id, rating }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) t.rating = d.rating;
+        this.abrirDetalle(id);   // re-pinta las estrellas con la nota guardada
+        if (global.UI && UI.toast) UI.toast('¡Gracias por tu calificación!');
+      } catch (e) {
+        if (global.UI && UI.toast) UI.toast('No se pudo calificar: ' + e.message);
+      }
+    },
+
     // Ficha de un ticket: descripción completa, badges, adjuntos con miniatura.
     abrirDetalle(id) {
       const t = this._tickets.find(x => String(x.id) === String(id));
@@ -227,6 +251,16 @@
                 <div class="tkcom__h">💬 ${esc(cm.author || 'Soporte')} · ${fechaCorta(cm.createdAt)}</div>
                 <div class="tkcom__b">${esc(cm.body || '').replace(/\n/g, '<br>')}</div>
               </div>`).join('')}</div>` : ''}
+          ${t.status === 'completado' ? `<div class="tkdet__sec">Calificación de la resolución</div>
+            <div class="tkrate">
+              ${t.mine
+                ? `${estrellasHtml(t.rating, true, t.id)}${t.rating != null
+                    ? `<span class="tkrate__val">${t.rating}/5</span>`
+                    : `<span class="tkrate__hint">Toca una estrella para calificar</span>`}`
+                : (t.rating != null
+                    ? `${estrellasHtml(t.rating, false)}<span class="tkrate__val">${t.rating}/5</span>`
+                    : `<span class="tkrate__hint">Sin calificar aún.</span>`)}
+            </div>` : ''}
         </div>`;
     },
 
@@ -385,6 +419,8 @@
         const sc = e.target.closest('[data-tkscope]');
         if (sc) { if (this._scope !== sc.dataset.tkscope) { this._scope = sc.dataset.tkscope; this.verLista(); } return; }
         if (e.target.closest('[data-tkback]')) return this.pintarLista();
+        const star = e.target.closest('.tkstar[data-star]');
+        if (star) { const box = star.closest('[data-tkrate]'); if (box) return this.calificar(box.dataset.tkrate, Number(star.dataset.star)); }
         const row = e.target.closest('[data-tkid]');
         if (row) return this.abrirDetalle(row.dataset.tkid);
       });

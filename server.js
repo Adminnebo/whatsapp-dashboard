@@ -140,7 +140,7 @@ app.use('/api/auth', authRouter);
 const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/tickets/list', '/tickets/comment', '/ghl/contact', '/contact', '/handoff-set']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
-const SIN_PLATAFORMA = new Set(['/tickets']);
+const SIN_PLATAFORMA = new Set(['/tickets', '/tickets/rate']);
 
 // Rate limit por IP SOLO para el panel/usuarios. Los endpoints de máquina
 // (n8n/Meta: save-in/out, ghl/contact, message-cost, webhooks…) van EXENTOS:
@@ -402,6 +402,9 @@ CREATE INDEX IF NOT EXISTS idx_tickets_ext ON tickets(external_id);
 -- Conversación afectada por el ticket (teléfono + nombre del contacto).
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS affected_phone TEXT;
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS affected_conversation TEXT;
+-- Calificación de la resolución (1–5 estrellas) que deja el solicitante al cerrarse.
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS rating INTEGER;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS rated_at TIMESTAMPTZ;
 -- Comentarios / respuestas de un ticket (del equipo de soporte, vía API).
 CREATE TABLE IF NOT EXISTS ticket_comments (
   id BIGSERIAL PRIMARY KEY,
@@ -1688,8 +1691,8 @@ app.get('/api/tickets', wrap(async (req, res) => {
   let filtro = '';
   if (!verTodos && hayUsuario) { params.push(req.user.id); filtro = 'WHERE user_id = $2'; }
   const r = await q(
-    `SELECT id, title, description, priority, category, status, origin, user_email, user_name, external_id,
-            affected_phone, affected_conversation,
+    `SELECT id, title, description, priority, category, status, origin, user_id, user_email, user_name, external_id,
+            affected_phone, affected_conversation, rating,
             EXTRACT(EPOCH FROM created_at)*1000 AS created_at, EXTRACT(EPOCH FROM completed_at)*1000 AS completed_at
      FROM tickets ${filtro} ORDER BY created_at DESC LIMIT $1`, params);
 
@@ -1731,6 +1734,8 @@ app.get('/api/tickets', wrap(async (req, res) => {
     status: t.status, origin: t.origin, userEmail: t.user_email, userName: t.user_name,
     affectedPhone: t.affected_phone || null, affectedConversation: t.affected_conversation || null,
     createdAt: Number(t.created_at) || 0, completedAt: t.completed_at ? Number(t.completed_at) : null,
+    rating: t.rating != null ? Number(t.rating) : null,
+    mine: !authConfigured || !!(req.user && String(t.user_id) === String(req.user.id)),
     files: porTicket.get(String(t.id)) || [],
     comments: porComentario.get(String(t.id)) || []
   })) });
@@ -1749,6 +1754,28 @@ app.patch('/api/tickets/:id', needSuper, wrap(async (req, res) => {
   const r = await q(`UPDATE tickets SET ${sets.join(', ')} WHERE id = $1 RETURNING id, category, priority`, vals);
   if (!r.rows[0]) return res.status(404).json({ error: 'Ticket no encontrado' });
   res.json({ ok: true, id: String(r.rows[0].id), category: r.rows[0].category, priority: r.rows[0].priority });
+}));
+
+// El solicitante califica la resolución del ticket (1–5 estrellas). Solo el autor
+// del ticket y solo cuando ya está completado.
+app.post('/api/tickets/rate', wrap(async (req, res) => {
+  if (authConfigured && !req.user) return res.status(401).json({ error: 'Requiere sesión' });
+  const b = req.body || {};
+  const ticketId = String(b.ticketId || b.id || '').replace(/[^0-9]/g, '');
+  const rating = Math.round(Number(b.rating));
+  if (!ticketId) return res.status(400).json({ error: 'Falta ticketId' });
+  if (!Number.isFinite(rating) || rating < 1 || rating > 5) return res.status(400).json({ error: 'La calificación debe ser de 1 a 5' });
+
+  const tk = await q(`SELECT id, user_id, status FROM tickets WHERE id = $1::bigint`, [ticketId]);
+  const t = tk.rows[0];
+  if (!t) return res.status(404).json({ error: 'Ticket no encontrado' });
+  if (authConfigured && req.user && t.user_id && String(t.user_id) !== String(req.user.id)) {
+    return res.status(403).json({ error: 'Solo quien creó el ticket puede calificarlo' });
+  }
+  if (t.status !== 'completado') return res.status(400).json({ error: 'Solo se puede calificar un ticket ya resuelto' });
+
+  const r = await q(`UPDATE tickets SET rating = $2, rated_at = now(), updated_at = now() WHERE id = $1 RETURNING id, rating`, [ticketId, rating]);
+  res.json({ ok: true, id: String(r.rows[0].id), rating: r.rows[0].rating });
 }));
 
 // ── Listado de tickets para sistemas externos (API key fija, sin sesión) ─────

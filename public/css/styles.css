@@ -841,5 +841,17 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tkcom__h { font-size: 11.5px; font-weight: 600; color: var(--text-mute); margin-bottom: 3px; }
 .tkcom__b { font-size: 13.5px; line-height: 1.45; color: var(--text); white-space: normal; }
 
+/* Estrellas de calificación de la resolución */
+.tkrate { display: flex; align-items: center; gap: 10px; }
+.tkstars { display: inline-flex; gap: 2px; font-size: 26px; line-height: 1; }
+.tkstar { color: var(--border); transition: color .12s, transform .12s; }
+.tkstar--on { color: #f5b301; }
+.tkstars--edit .tkstar { cursor: pointer; }
+.tkstars--edit:hover .tkstar { color: #f5b301; }
+.tkstars--edit .tkstar:hover ~ .tkstar { color: var(--border); }
+.tkstars--edit .tkstar:hover { transform: scale(1.15); }
+.tkrate__val { font-size: 13px; font-weight: 700; color: var(--text); }
+.tkrate__hint { font-size: 12.5px; color: var(--text-mute); }
+
 /* Selector de categoría en el detalle del ticket (solo super admin) */
 select.tkcat-sel { padding: 3px 8px; border-radius: 999px; cursor: pointer; border: 1px dashed var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; }
