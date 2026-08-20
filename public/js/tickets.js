@@ -221,6 +221,24 @@
       }
     },
 
+    // Borrar un ticket por completo (solo super admin; lo valida el backend).
+    async borrar(id) {
+      const t = this._tickets.find(x => String(x.id) === String(id));
+      if (!confirm(`¿Borrar el ticket "${(t && t.title) || id}"? Esta acción no se puede deshacer.`)) return;
+      const h = {};
+      if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
+      try {
+        const r = await fetch('/api/tickets/' + encodeURIComponent(id), { method: 'DELETE', headers: h });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        this._tickets = this._tickets.filter(x => String(x.id) !== String(id));
+        this.pintarLista();
+        if (global.UI && UI.toast) UI.toast('Ticket borrado');
+      } catch (e) {
+        if (global.UI && UI.toast) UI.toast('No se pudo borrar: ' + e.message);
+      }
+    },
+
     // Ficha de un ticket: descripción completa, badges, adjuntos con miniatura.
     abrirDetalle(id) {
       const t = this._tickets.find(x => String(x.id) === String(id));
@@ -261,6 +279,7 @@
                     ? `${estrellasHtml(t.rating, false)}<span class="tkrate__val">${t.rating}/5</span>`
                     : `<span class="tkrate__hint">Sin calificar aún.</span>`)}
             </div>` : ''}
+          ${this._super ? `<div class="tkdet__danger"><button class="tkdel" data-tkdel="${esc(t.id)}">🗑 Borrar ticket</button></div>` : ''}
         </div>`;
     },
 
@@ -421,6 +440,8 @@
         if (e.target.closest('[data-tkback]')) return this.pintarLista();
         const star = e.target.closest('.tkstar[data-star]');
         if (star) { const box = star.closest('[data-tkrate]'); if (box) return this.calificar(box.dataset.tkrate, Number(star.dataset.star)); }
+        const del = e.target.closest('[data-tkdel]');
+        if (del) return this.borrar(del.dataset.tkdel);
         const row = e.target.closest('[data-tkid]');
         if (row) return this.abrirDetalle(row.dataset.tkid);
       });

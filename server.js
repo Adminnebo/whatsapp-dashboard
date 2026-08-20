@@ -1756,6 +1756,17 @@ app.patch('/api/tickets/:id', needSuper, wrap(async (req, res) => {
   res.json({ ok: true, id: String(r.rows[0].id), category: r.rows[0].category, priority: r.rows[0].priority });
 }));
 
+// Borrar un ticket por completo (solo super_admin). Se lleva sus comentarios y adjuntos.
+app.delete('/api/tickets/:id', needSuper, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'Id inválido' });
+  await q(`DELETE FROM ticket_comments WHERE ticket_id = $1::bigint`, [id]).catch(() => {});
+  await q(`DELETE FROM ticket_files WHERE ticket_id = $1::bigint`, [id]).catch(() => {});
+  const r = await q(`DELETE FROM tickets WHERE id = $1::bigint RETURNING id`, [id]);
+  if (!r.rows[0]) return res.status(404).json({ error: 'Ticket no encontrado' });
+  res.json({ ok: true, id: String(r.rows[0].id) });
+}));
+
 // El solicitante califica la resolución del ticket (1–5 estrellas). Solo el autor
 // del ticket y solo cuando ya está completado.
 app.post('/api/tickets/rate', wrap(async (req, res) => {
