@@ -572,6 +572,9 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .modal__backdrop { position: absolute; inset: 0; background: rgba(18,28,45,.45); backdrop-filter: blur(2px); }
 .modal__card { position: relative; background: var(--panel); border-radius: 16px; width: 540px; max-width: 92vw; max-height: 88vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,.25); }
 .modal__card--sm { width: 420px; }
+/* El modal de Tickets es más grande: la lista y el detalle piden más aire. */
+#ticketsModal .modal__card { width: 760px; max-width: 94vw; max-height: 92vh; }
+#ticketsModal .modal__body { padding: 22px 26px; }
 .modal__head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--border); }
 .modal__head h2 { font-size: 17px; font-weight: 700; }
 .modal__body { padding: 20px 22px; overflow-y: auto; }
