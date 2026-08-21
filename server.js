@@ -675,6 +675,19 @@ async function dedupeByConversation(convId) {
   const cr = await q(`SELECT c.id, c.phone, c.user_id, c.ghl_contact_id
                       FROM conversations cv JOIN contacts c ON c.id = cv.contact_id WHERE cv.id = $1::bigint`, [convId]);
   const c = cr.rows[0]; if (!c) return;
+  // Si el contacto NO tiene teléfono, lo recupera del wamid de sus mensajes. Cubre
+  // el caso en que el user_id de Meta llega corrupto/sin teléfono → se crea un
+  // contacto que ninguna clave (id distinto, sin phone) enlaza con el real. El
+  // teléfono verdadero vive dentro del wamid; lo persistimos y lo usamos para fundir.
+  let phone = c.phone;
+  if (!phone) {
+    const w = (await q(`SELECT wamid FROM messages WHERE conversation_id = $1 AND wamid IS NOT NULL ORDER BY id ASC LIMIT 1`, [convId])).rows[0];
+    const rec = recuperarDeWamid(w && w.wamid);
+    if (rec.phone) {
+      phone = rec.phone;
+      await q(`UPDATE contacts SET phone = COALESCE(phone, $2), updated_at = now() WHERE id = $1`, [c.id, phone]);
+    }
+  }
   const md = metaDigitsOf(c.user_id) || metaDigitsOf(c.ghl_contact_id);   // dígitos del user_id de Meta
   const r = await q(
     `SELECT o.id AS oid FROM contacts o WHERE o.id <> $1 AND (
@@ -685,7 +698,7 @@ async function dedupeByConversation(convId) {
         ($5::text IS NOT NULL AND (
            regexp_replace(COALESCE(o.user_id, ''),        '\\D', '', 'g') = $5 OR
            regexp_replace(COALESCE(o.ghl_contact_id, ''), '\\D', '', 'g') = $5 ))
-     ) LIMIT 1`, [c.id, c.phone || null, c.user_id || null, c.ghl_contact_id || null, md || null]);
+     ) LIMIT 1`, [c.id, phone || null, c.user_id || null, c.ghl_contact_id || null, md || null]);
   if (r.rows[0]) await mergeTwoContacts(c.id, r.rows[0].oid);
 }
 // Dígitos del user_id de Meta: une la forma con prefijo (DO.2243…) con la de solo
