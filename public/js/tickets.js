@@ -221,6 +221,26 @@
       }
     },
 
+    // El creador deja un comentario propio en su ticket (p.ej. tras calificar).
+    async comentar(id) {
+      const ta = document.getElementById('tkMyCom');
+      const body = ta ? ta.value.trim() : '';
+      if (!body) { if (global.UI && UI.toast) UI.toast('Escribe un comentario primero'); if (ta) ta.focus(); return; }
+      const h = { 'Content-Type': 'application/json' };
+      if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
+      try {
+        const r = await fetch('/api/tickets/comment-mine', { method: 'POST', headers: h, body: JSON.stringify({ ticketId: id, comment: body }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) { t.comments = t.comments || []; if (d.comment) t.comments.push(d.comment); }
+        this.abrirDetalle(id);   // re-pinta con el comentario nuevo
+        if (global.UI && UI.toast) UI.toast('Comentario enviado');
+      } catch (e) {
+        if (global.UI && UI.toast) UI.toast('No se pudo enviar: ' + e.message);
+      }
+    },
+
     // Borrar un ticket por completo (solo super admin; lo valida el backend).
     async borrar(id) {
       const t = this._tickets.find(x => String(x.id) === String(id));
@@ -265,8 +285,8 @@
           ${otros.length ? `<div class="tkdet__sec">Adjuntos</div><div class="tkitem__adjs">${otros.map(f => `<a class="tkitem__adj" href="${esc(f.url)}" target="_blank" rel="noopener">${iconoDe(f.mime)} ${esc(f.name)}</a>`).join('')}</div>` : ''}
           ${(t.comments && t.comments.length) ? `<div class="tkdet__sec">Respuestas (${t.comments.length})</div>
             <div class="tkcoms">${t.comments.map(cm => `
-              <div class="tkcom">
-                <div class="tkcom__h">💬 ${esc(cm.author || 'Soporte')} · ${fechaCorta(cm.createdAt)}</div>
+              <div class="tkcom${cm.source === 'cliente' ? ' tkcom--mine' : ''}">
+                <div class="tkcom__h">${cm.source === 'cliente' ? '🙋' : '💬'} ${esc(cm.author || 'Soporte')} · ${fechaCorta(cm.createdAt)}</div>
                 <div class="tkcom__b">${esc(cm.body || '').replace(/\n/g, '<br>')}</div>
               </div>`).join('')}</div>` : ''}
           ${t.status === 'completado' ? `<div class="tkdet__sec">Calificación de la resolución</div>
@@ -278,7 +298,11 @@
                 : (t.rating != null
                     ? `${estrellasHtml(t.rating, false)}<span class="tkrate__val">${t.rating}/5</span>`
                     : `<span class="tkrate__hint">Sin calificar aún.</span>`)}
-            </div>` : ''}
+            </div>
+            ${t.mine ? `<div class="tkmycom">
+              <textarea id="tkMyCom" class="tkmycom__ta" rows="2" maxlength="4000" placeholder="Escribe un comentario sobre la resolución…"></textarea>
+              <button class="tkmycom__btn" data-tkmycom="${esc(t.id)}">Enviar comentario</button>
+            </div>` : ''}` : ''}
           ${this._super ? `<div class="tkdet__danger"><button class="tkdel" data-tkdel="${esc(t.id)}">🗑 Borrar ticket</button></div>` : ''}
         </div>`;
     },
@@ -442,6 +466,8 @@
         if (star) { const box = star.closest('[data-tkrate]'); if (box) return this.calificar(box.dataset.tkrate, Number(star.dataset.star)); }
         const del = e.target.closest('[data-tkdel]');
         if (del) return this.borrar(del.dataset.tkdel);
+        const myc = e.target.closest('[data-tkmycom]');
+        if (myc) return this.comentar(myc.dataset.tkmycom);
         const row = e.target.closest('[data-tkid]');
         if (row) return this.abrirDetalle(row.dataset.tkid);
       });

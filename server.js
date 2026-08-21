@@ -140,7 +140,7 @@ app.use('/api/auth', authRouter);
 const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/tickets/list', '/tickets/comment', '/ghl/contact', '/contact', '/handoff-set']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
-const SIN_PLATAFORMA = new Set(['/tickets', '/tickets/rate']);
+const SIN_PLATAFORMA = new Set(['/tickets', '/tickets/rate', '/tickets/comment-mine']);
 
 // Rate limit por IP SOLO para el panel/usuarios. Los endpoints de máquina
 // (n8n/Meta: save-in/out, ghl/contact, message-cost, webhooks…) van EXENTOS:
@@ -1787,6 +1787,44 @@ app.post('/api/tickets/rate', wrap(async (req, res) => {
 
   const r = await q(`UPDATE tickets SET rating = $2, rated_at = now(), updated_at = now() WHERE id = $1 RETURNING id, rating`, [ticketId, rating]);
   res.json({ ok: true, id: String(r.rows[0].id), rating: r.rows[0].rating });
+}));
+
+// El solicitante deja un comentario propio en su ticket (p.ej. tras calificar).
+// Requiere sesión y ser el autor del ticket. Guarda source='cliente'.
+app.post('/api/tickets/comment-mine', wrap(async (req, res) => {
+  if (authConfigured && !req.user) return res.status(401).json({ error: 'Requiere sesión' });
+  const b = req.body || {};
+  const ticketId = String(b.ticketId || b.id || '').replace(/[^0-9]/g, '');
+  const body = String(b.comment || b.body || b.text || '').trim();
+  if (!ticketId) return res.status(400).json({ error: 'Falta ticketId' });
+  if (!body) return res.status(400).json({ error: 'Falta el comentario' });
+
+  const tk = await q(`SELECT id, user_id FROM tickets WHERE id = $1::bigint`, [ticketId]);
+  const t = tk.rows[0];
+  if (!t) return res.status(404).json({ error: 'Ticket no encontrado' });
+  if (authConfigured && req.user && t.user_id && String(t.user_id) !== String(req.user.id)) {
+    return res.status(403).json({ error: 'Solo quien creó el ticket puede comentarlo' });
+  }
+
+  const author = (await agentName(req)) || (req.user && req.user.email) || 'Solicitante';
+  const authorEmail = (req.user && req.user.email) || null;
+  const ins = await q(
+    `INSERT INTO ticket_comments (ticket_id, author, author_email, body, source)
+     VALUES ($1,$2,$3,$4,'cliente') RETURNING id, EXTRACT(EPOCH FROM created_at)*1000 AS created_at`,
+    [t.id, String(author).slice(0, 120), authorEmail && authorEmail.slice(0, 160), body.slice(0, 4000)]);
+  await q(`UPDATE tickets SET updated_at = now() WHERE id = $1`, [t.id]);
+
+  res.json({
+    ok: true,
+    comment: {
+      id: String(ins.rows[0].id),
+      author: String(author),
+      body: body.slice(0, 4000),
+      createdAt: Number(ins.rows[0].created_at) || 0,
+      source: 'cliente',
+      mine: true
+    }
+  });
 }));
 
 // ── Listado de tickets para sistemas externos (API key fija, sin sesión) ─────
