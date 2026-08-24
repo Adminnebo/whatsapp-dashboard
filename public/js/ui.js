@@ -221,9 +221,10 @@
       if (elapsed <= H24) return { state: 'free' };
       if (canal === 'whatsapp')
         return { state: 'wa', tone: 'warn', html: 'Fuera de la ventana de 24 h. Solo puedes enviar una <strong>plantilla aprobada</strong> por Meta.' };
-      // instagram / facebook
+      // instagram / facebook: fuera de 24h el envío por el inbox (API de GHL) suele
+      // fallar porque no aplica el tag de agente humano; desde GoHighLevel sí funciona.
       if (elapsed <= D7)
-        return { state: 'human', tone: 'info', html: `Fuera de las 24 h en <strong>${nombreCanal}</strong>. Puedes responder <strong>como agente humano</strong> hasta 7 días después del último mensaje del cliente (no promociones).` };
+        return { state: 'human', tone: 'warn', html: `Fuera de las 24 h en <strong>${nombreCanal}</strong>. Responder desde el inbox <strong>puede fallar</strong>; respóndele desde <strong>GoHighLevel</strong> (hasta 7 días) o espera a que el cliente escriba.` };
       return { state: 'closed', tone: 'warn', html: `Pasaron más de <strong>7 días</strong> desde el último mensaje. Meta no permite reabrir esta conversación de <strong>${nombreCanal}</strong>; espera a que el cliente escriba.` };
     },
 
