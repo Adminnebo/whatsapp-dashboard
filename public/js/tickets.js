@@ -259,6 +259,28 @@
       }
     },
 
+    // El soporte (super admin) responde al cliente desde el panel. Opción de
+    // "esperar respuesta del cliente" → pasa el ticket a esperando_cliente.
+    async responder(id) {
+      const ta = document.getElementById('tkStaffCom');
+      const wait = document.getElementById('tkStaffWait');
+      const body = ta ? ta.value.trim() : '';
+      if (!body) { if (global.UI && UI.toast) UI.toast('Escribe una respuesta primero'); if (ta) ta.focus(); return; }
+      const h = { 'Content-Type': 'application/json' };
+      if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
+      try {
+        const r = await fetch('/api/tickets/comment-staff', { method: 'POST', headers: h, body: JSON.stringify({ ticketId: id, comment: body, waitingCustomer: !!(wait && wait.checked) }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) { t.comments = t.comments || []; if (d.comment) t.comments.push(d.comment); if (d.status) t.status = d.status; }
+        this.abrirDetalle(id);
+        if (global.UI && UI.toast) UI.toast(d.status === 'esperando_cliente' ? 'Respuesta enviada · esperando al cliente' : 'Respuesta enviada');
+      } catch (e) {
+        if (global.UI && UI.toast) UI.toast('No se pudo enviar: ' + e.message);
+      }
+    },
+
     // Borrar un ticket por completo (solo super admin; lo valida el backend).
     async borrar(id) {
       const t = this._tickets.find(x => String(x.id) === String(id));
@@ -309,6 +331,12 @@
                 <div class="tkcom__h">${cm.source === 'cliente' ? '🙋' : '💬'} ${esc(cm.author || 'Soporte')} · ${fechaCorta(cm.createdAt)}</div>
                 <div class="tkcom__b">${esc(cm.body || '').replace(/\n/g, '<br>')}</div>
               </div>`).join('')}</div>` : ''}
+          ${this._super && t.status !== 'completado' ? `<div class="tkdet__sec">Responder al cliente</div>
+            <div class="tkstaff">
+              <textarea id="tkStaffCom" class="tkmycom__ta" rows="2" maxlength="4000" placeholder="Escribe la respuesta para el cliente…"></textarea>
+              <label class="tkstaff__wait"><input type="checkbox" id="tkStaffWait"${t.status === 'esperando_cliente' ? ' checked' : ''} /> Esperar respuesta del cliente</label>
+              <button class="tkmycom__btn" data-tkstaff="${esc(t.id)}">Responder al cliente</button>
+            </div>` : ''}
           ${t.status === 'completado' ? `<div class="tkdet__sec">Calificación de la resolución</div>
             <div class="tkrate">
               ${t.mine
@@ -490,6 +518,8 @@
         if (del) return this.borrar(del.dataset.tkdel);
         const myc = e.target.closest('[data-tkmycom]');
         if (myc) return this.comentar(myc.dataset.tkmycom);
+        const staff = e.target.closest('[data-tkstaff]');
+        if (staff) return this.responder(staff.dataset.tkstaff);
         const row = e.target.closest('[data-tkid]');
         if (row) return this.abrirDetalle(row.dataset.tkid);
       });

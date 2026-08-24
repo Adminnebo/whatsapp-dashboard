@@ -1850,6 +1850,55 @@ app.post('/api/tickets/comment-mine', wrap(async (req, res) => {
   });
 }));
 
+// El SOPORTE responde al cliente desde el panel (super admin). Guarda el comentario
+// (source='soporte'), notifica al autor y — si se marca "esperar respuesta" — pasa
+// el ticket a esperando_cliente. Equivalente en UI al webhook del gestor de tareas.
+app.post('/api/tickets/comment-staff', needSuper, wrap(async (req, res) => {
+  const b = req.body || {};
+  const ticketId = String(b.ticketId || b.id || '').replace(/[^0-9]/g, '');
+  const body = String(b.comment || b.body || b.text || '').trim();
+  if (!ticketId) return res.status(400).json({ error: 'Falta ticketId' });
+  if (!body) return res.status(400).json({ error: 'Falta el comentario' });
+
+  const tk = await q(`SELECT id, title, user_id, status FROM tickets WHERE id = $1::bigint`, [ticketId]);
+  const t = tk.rows[0];
+  if (!t) return res.status(404).json({ error: 'Ticket no encontrado' });
+
+  const author = (await agentName(req)) || (req.user && req.user.email) || 'Soporte';
+  const authorEmail = (req.user && req.user.email) || null;
+  const ins = await q(
+    `INSERT INTO ticket_comments (ticket_id, author, author_email, body, source)
+     VALUES ($1,$2,$3,$4,'soporte') RETURNING id, EXTRACT(EPOCH FROM created_at)*1000 AS created_at`,
+    [t.id, String(author).slice(0, 120), authorEmail && authorEmail.slice(0, 160), body.slice(0, 4000)]);
+
+  // ¿Espera una aclaración del cliente? → esperando_cliente (salvo que esté completado).
+  const esperando = b.waitingCustomer === true || b.esperando === true;
+  let nuevoStatus = t.status;
+  if (esperando && t.status !== 'completado') {
+    const up = await q(`UPDATE tickets SET status = 'esperando_cliente', updated_at = now() WHERE id = $1 RETURNING status`, [t.id]);
+    nuevoStatus = up.rows[0].status;
+  } else {
+    await q(`UPDATE tickets SET updated_at = now() WHERE id = $1`, [t.id]);
+  }
+
+  if (t.user_id) {
+    await notify({
+      type: 'ticket', userId: t.user_id,
+      title: esperando ? '❓ Tu ticket necesita una aclaración' : '💬 Respondieron tu ticket',
+      body: author + ': ' + (body.length > 140 ? body.slice(0, 140) + '…' : body),
+      refId: 'ticket-comment-' + ins.rows[0].id
+    });
+  }
+  res.json({
+    ok: true, status: nuevoStatus,
+    comment: {
+      id: String(ins.rows[0].id), author: String(author),
+      body: body.slice(0, 4000), createdAt: Number(ins.rows[0].created_at) || 0,
+      source: 'soporte', mine: false
+    }
+  });
+}));
+
 // ── Listado de tickets para sistemas externos (API key fija, sin sesión) ─────
 // Auth por clave compartida TICKETS_LIST_KEY (header X-Api-Key, Bearer o ?key=).
 // (Distinta de TICKETS_API_KEY, que es la clave SALIENTE al crear tickets.)
