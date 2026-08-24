@@ -425,6 +425,9 @@ CREATE TABLE IF NOT EXISTS ticket_files (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_ticket_files ON ticket_files(ticket_id);
+-- Un adjunto puede pertenecer a un COMENTARIO (respuesta del soporte) además del ticket.
+ALTER TABLE ticket_files ADD COLUMN IF NOT EXISTS comment_id BIGINT REFERENCES ticket_comments(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_ticket_files_comment ON ticket_files(comment_id) WHERE comment_id IS NOT NULL;
 `;
 async function migrate() { await q(MIGRATIONS); }
 
@@ -1715,7 +1718,7 @@ app.get('/api/tickets', wrap(async (req, res) => {
   if (ids.length) {
     const rf = await q(
       `SELECT id, ticket_id, filename, mime, size_bytes FROM ticket_files
-       WHERE ticket_id = ANY($1::bigint[]) ORDER BY id`, [ids]);
+       WHERE ticket_id = ANY($1::bigint[]) AND comment_id IS NULL ORDER BY id`, [ids]);
     for (const f of rf.rows) {
       const k = String(f.ticket_id);
       if (!porTicket.has(k)) porTicket.set(k, []);
@@ -1726,18 +1729,31 @@ app.get('/api/tickets', wrap(async (req, res) => {
     }
   }
 
-  // Comentarios / respuestas de esos tickets.
+  // Comentarios / respuestas de esos tickets (con sus adjuntos, si tienen).
   const porComentario = new Map();
   if (ids.length) {
     const rc = await q(
       `SELECT id, ticket_id, author, author_email, body, source, EXTRACT(EPOCH FROM created_at)*1000 AS created_at
        FROM ticket_comments WHERE ticket_id = ANY($1::bigint[]) ORDER BY created_at`, [ids]);
+    const comIds = rc.rows.map(c => String(c.id));
+    const filesPorComentario = new Map();
+    if (comIds.length) {
+      const rcf = await q(
+        `SELECT id, comment_id, filename, mime, size_bytes FROM ticket_files
+         WHERE comment_id = ANY($1::bigint[]) ORDER BY id`, [comIds]);
+      for (const f of rcf.rows) {
+        const k = String(f.comment_id);
+        if (!filesPorComentario.has(k)) filesPorComentario.set(k, []);
+        filesPorComentario.get(k).push({ id: String(f.id), name: f.filename || 'adjunto', mime: f.mime || null, size: Number(f.size_bytes) || 0, url: tfUrlFor(req, f.id) });
+      }
+    }
     for (const cm of rc.rows) {
       const k = String(cm.ticket_id);
       if (!porComentario.has(k)) porComentario.set(k, []);
       porComentario.get(k).push({
         id: String(cm.id), author: cm.author || null, authorEmail: cm.author_email || null,
-        body: cm.body || '', source: cm.source || null, createdAt: Number(cm.created_at) || 0
+        body: cm.body || '', source: cm.source || null, createdAt: Number(cm.created_at) || 0,
+        files: filesPorComentario.get(String(cm.id)) || []
       });
     }
   }
@@ -1853,12 +1869,13 @@ app.post('/api/tickets/comment-mine', wrap(async (req, res) => {
 // El SOPORTE responde al cliente desde el panel (super admin). Guarda el comentario
 // (source='soporte'), notifica al autor y — si se marca "esperar respuesta" — pasa
 // el ticket a esperando_cliente. Equivalente en UI al webhook del gestor de tareas.
-app.post('/api/tickets/comment-staff', needSuper, wrap(async (req, res) => {
+app.post('/api/tickets/comment-staff', needSuper, conAdjuntos, wrap(async (req, res) => {
   const b = req.body || {};
   const ticketId = String(b.ticketId || b.id || '').replace(/[^0-9]/g, '');
   const body = String(b.comment || b.body || b.text || '').trim();
+  const archivos = adjuntosDe(req);          // multipart o base64
   if (!ticketId) return res.status(400).json({ error: 'Falta ticketId' });
-  if (!body) return res.status(400).json({ error: 'Falta el comentario' });
+  if (!body && !archivos.length) return res.status(400).json({ error: 'Falta el comentario o un adjunto' });
 
   const tk = await q(`SELECT id, title, user_id, status FROM tickets WHERE id = $1::bigint`, [ticketId]);
   const t = tk.rows[0];
@@ -1870,9 +1887,19 @@ app.post('/api/tickets/comment-staff', needSuper, wrap(async (req, res) => {
     `INSERT INTO ticket_comments (ticket_id, author, author_email, body, source)
      VALUES ($1,$2,$3,$4,'soporte') RETURNING id, EXTRACT(EPOCH FROM created_at)*1000 AS created_at`,
     [t.id, String(author).slice(0, 120), authorEmail && authorEmail.slice(0, 160), body.slice(0, 4000)]);
+  const cid = ins.rows[0].id;
+
+  // Adjuntos de la respuesta: se ligan al comentario (además del ticket).
+  const files = [];
+  for (const a of archivos) {
+    const fr = await q(
+      `INSERT INTO ticket_files (ticket_id, comment_id, filename, mime, size_bytes, data) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [t.id, cid, a.nombre, a.mime, a.datos.length, a.datos]);
+    files.push({ id: String(fr.rows[0].id), name: a.nombre, mime: a.mime, size: a.datos.length, url: tfUrlFor(req, fr.rows[0].id) });
+  }
 
   // ¿Espera una aclaración del cliente? → esperando_cliente (salvo que esté completado).
-  const esperando = b.waitingCustomer === true || b.esperando === true;
+  const esperando = b.waitingCustomer === true || b.waitingCustomer === 'true' || b.esperando === true || b.esperando === 'true';
   let nuevoStatus = t.status;
   if (esperando && t.status !== 'completado') {
     const up = await q(`UPDATE tickets SET status = 'esperando_cliente', updated_at = now() WHERE id = $1 RETURNING status`, [t.id]);
@@ -1885,16 +1912,16 @@ app.post('/api/tickets/comment-staff', needSuper, wrap(async (req, res) => {
     await notify({
       type: 'ticket', userId: t.user_id,
       title: esperando ? '❓ Tu ticket necesita una aclaración' : '💬 Respondieron tu ticket',
-      body: author + ': ' + (body.length > 140 ? body.slice(0, 140) + '…' : body),
-      refId: 'ticket-comment-' + ins.rows[0].id
+      body: author + ': ' + (body ? (body.length > 140 ? body.slice(0, 140) + '…' : body) : (files.length + ' adjunto(s)')),
+      refId: 'ticket-comment-' + cid
     });
   }
   res.json({
     ok: true, status: nuevoStatus,
     comment: {
-      id: String(ins.rows[0].id), author: String(author),
+      id: String(cid), author: String(author),
       body: body.slice(0, 4000), createdAt: Number(ins.rows[0].created_at) || 0,
-      source: 'soporte', mine: false
+      source: 'soporte', mine: false, files
     }
   });
 }));

@@ -264,12 +264,25 @@
     async responder(id) {
       const ta = document.getElementById('tkStaffCom');
       const wait = document.getElementById('tkStaffWait');
+      const fi = document.getElementById('tkStaffFiles');
       const body = ta ? ta.value.trim() : '';
-      if (!body) { if (global.UI && UI.toast) UI.toast('Escribe una respuesta primero'); if (ta) ta.focus(); return; }
-      const h = { 'Content-Type': 'application/json' };
+      const files = fi && fi.files ? [...fi.files] : [];
+      if (!body && !files.length) { if (global.UI && UI.toast) UI.toast('Escribe una respuesta o adjunta un archivo'); if (ta) ta.focus(); return; }
+      const esperar = !!(wait && wait.checked);
+      // Con adjuntos va como multipart (sin Content-Type: lo pone el navegador con el boundary).
+      const h = {};
       if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
+      let opts;
+      if (files.length) {
+        const fd = new FormData();
+        fd.append('ticketId', id); fd.append('comment', body); fd.append('waitingCustomer', esperar ? 'true' : 'false');
+        files.forEach(f => fd.append('archivos', f, f.name));
+        opts = { method: 'POST', headers: h, body: fd };
+      } else {
+        opts = { method: 'POST', headers: { ...h, 'Content-Type': 'application/json' }, body: JSON.stringify({ ticketId: id, comment: body, waitingCustomer: esperar }) };
+      }
       try {
-        const r = await fetch('/api/tickets/comment-staff', { method: 'POST', headers: h, body: JSON.stringify({ ticketId: id, comment: body, waitingCustomer: !!(wait && wait.checked) }) });
+        const r = await fetch('/api/tickets/comment-staff', opts);
         const d = await r.json().catch(() => null);
         if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
         const t = this._tickets.find(x => String(x.id) === String(id));
@@ -329,11 +342,19 @@
             <div class="tkcoms">${t.comments.map(cm => `
               <div class="tkcom${cm.source === 'cliente' ? ' tkcom--mine' : ''}">
                 <div class="tkcom__h">${cm.source === 'cliente' ? '🙋' : '💬'} ${esc(cm.author || 'Soporte')} · ${fechaCorta(cm.createdAt)}</div>
-                <div class="tkcom__b">${esc(cm.body || '').replace(/\n/g, '<br>')}</div>
+                ${cm.body ? `<div class="tkcom__b">${esc(cm.body).replace(/\n/g, '<br>')}</div>` : ''}
+                ${(cm.files && cm.files.length) ? `<div class="tkcom__files">${cm.files.map(f => esImagen(f.mime)
+                  ? `<a class="tkcom__img" href="${esc(f.url)}" target="_blank" rel="noopener" title="${esc(f.name)}"><img src="${esc(f.url)}" alt="${esc(f.name)}" loading="lazy" /></a>`
+                  : `<a class="tkcom__file" href="${esc(f.url)}" target="_blank" rel="noopener">${iconoDe(f.mime)} ${esc(f.name)}</a>`).join('')}</div>` : ''}
               </div>`).join('')}</div>` : ''}
           ${this._super && t.status !== 'completado' ? `<div class="tkdet__sec">Responder al cliente</div>
             <div class="tkstaff">
               <textarea id="tkStaffCom" class="tkmycom__ta" rows="2" maxlength="4000" placeholder="Escribe la respuesta para el cliente…"></textarea>
+              <div class="tkstaff__row">
+                <input type="file" id="tkStaffFiles" multiple hidden />
+                <button type="button" class="tkstaff__attach" data-tkstaffattach>📎 Adjuntar</button>
+                <span class="tkstaff__files" id="tkStaffFilesLbl"></span>
+              </div>
               <label class="tkstaff__wait"><input type="checkbox" id="tkStaffWait"${t.status === 'esperando_cliente' ? ' checked' : ''} /> Esperar respuesta del cliente</label>
               <button class="tkmycom__btn" data-tkstaff="${esc(t.id)}">Responder al cliente</button>
             </div>` : ''}
@@ -518,6 +539,7 @@
         if (del) return this.borrar(del.dataset.tkdel);
         const myc = e.target.closest('[data-tkmycom]');
         if (myc) return this.comentar(myc.dataset.tkmycom);
+        if (e.target.closest('[data-tkstaffattach]')) { const fi = document.getElementById('tkStaffFiles'); if (fi) fi.click(); return; }
         const staff = e.target.closest('[data-tkstaff]');
         if (staff) return this.responder(staff.dataset.tkstaff);
         const row = e.target.closest('[data-tkid]');
@@ -533,6 +555,7 @@
         if (catSel) return this.cambiarCategoria(catSel.dataset.tkcat, catSel.value);
         const estSel = e.target.closest('[data-tkest]');
         if (estSel) return this.cambiarEstado(estSel.dataset.tkest, estSel.value);
+        if (e.target.id === 'tkStaffFiles') { const lbl = document.getElementById('tkStaffFilesLbl'); if (lbl) lbl.textContent = [...e.target.files].map(f => f.name).join(', '); return; }
         const map = { tkPrio: '_prio', tkCat: '_cat', tkDias: '_dias', tkOrden: '_orden' };
         const k = map[e.target.id];
         if (k) { this[k] = e.target.value; this.pintarItems(); }

@@ -866,6 +866,14 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tkmycom__ta { width: 100%; resize: vertical; min-height: 44px; font: inherit; font-size: 13.5px; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
 .tkstaff { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .tkstaff__wait { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-soft); cursor: pointer; }
+.tkstaff__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tkstaff__attach { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 12.5px; cursor: pointer; color: var(--text); }
+.tkstaff__attach:hover { background: var(--hover); }
+.tkstaff__files { font-size: 12px; color: var(--text-mute); overflow: hidden; text-overflow: ellipsis; }
+.tkcom__files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.tkcom__img { display: block; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border-soft); }
+.tkcom__img img { width: 100%; height: 100%; object-fit: cover; }
+.tkcom__file { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; padding: 5px 9px; border: 1px solid var(--border-soft); border-radius: 8px; color: var(--brand); text-decoration: none; }
 .tkmycom__btn { background: var(--brand); color: #fff; border: 0; border-radius: 8px; padding: 8px 16px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .tkmycom__btn:hover { filter: brightness(1.05); }
 .tkcom--mine { border-color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, var(--bg)); }
