@@ -743,8 +743,10 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .tkitem__est--nuevo { background: var(--bg); color: var(--text-soft); }
 .tkitem__est--prog { background: #fff3d6; color: #9a6b00; }
 .tkitem__est--ok { background: #d8f5e3; color: #0f7a3d; }
+.tkitem__est--espera { background: #e6ecff; color: #3b52b4; }
 [data-theme="dark"] .tkitem__est--ok { background: rgba(26,161,121,.2); color: #34d399; }
 [data-theme="dark"] .tkitem__est--prog { background: #3a2f10; color: #e8c66a; }
+[data-theme="dark"] .tkitem__est--espera { background: #1b2350; color: #9db2ff; }
 
 /* --- barra: filtros con contador + buscador --- */
 .tklist__bar { display: flex; flex-direction: column; gap: 9px; padding: 4px 0 10px; }
@@ -873,3 +875,8 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 
 /* Selector de categoría en el detalle del ticket (solo super admin) */
 select.tkcat-sel { padding: 3px 8px; border-radius: 999px; cursor: pointer; border: 1px dashed var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 12px; }
+/* Selector de estado del ticket (solo super admin) */
+select.tkest-sel { padding: 2px 8px; border-radius: 10px; cursor: pointer; border: 1px dashed var(--border); background: var(--bg); color: var(--text); font: inherit; font-size: 11px; font-weight: 700; }
+/* Aviso "están esperando tu respuesta" en el detalle del cliente */
+.tkmycom__wait { font-size: 12.5px; color: #3b52b4; background: #e6ecff; border-radius: 8px; padding: 8px 11px; margin: 4px 0 8px; }
+[data-theme="dark"] .tkmycom__wait { color: #9db2ff; background: #1b2350; }

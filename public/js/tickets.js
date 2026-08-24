@@ -35,9 +35,10 @@
   const esImagen = m => /^image\//.test(m || '');
 
   // Estado (etiqueta + clase), prioridad (etiqueta) y fechas — compartidos por lista y detalle.
-  const EST = { nuevo: ['Nuevo', 'nuevo'], en_progreso: ['En progreso', 'prog'], completado: ['✓ Completado', 'ok'] };
+  const EST = { nuevo: ['Nuevo', 'nuevo'], en_progreso: ['En progreso', 'prog'], esperando_cliente: ['Esperando cliente', 'espera'], completado: ['✓ Completado', 'ok'] };
+  const ESTADOS = ['nuevo', 'en_progreso', 'esperando_cliente', 'completado'];
   const PRI = { baja: 'Baja', media: 'Media', alta: 'Alta', urgente: 'Urgente' };
-  const FILTROS = [['todos', 'Todos'], ['nuevo', 'Nuevos'], ['en_progreso', 'En progreso'], ['completado', 'Completados']];
+  const FILTROS = [['todos', 'Todos'], ['nuevo', 'Nuevos'], ['en_progreso', 'En progreso'], ['esperando_cliente', 'Esperando cliente'], ['completado', 'Completados']];
   const fechaCorta = ms => ms ? new Date(ms).toLocaleDateString('es-DO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
   const fechaLarga = ms => ms ? new Date(ms).toLocaleString('es-DO', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 
@@ -103,7 +104,7 @@
     // Barra (toggle admin + filtros de estado + buscador + selects) y filas.
     pintarLista() {
       const box = $('#ticketList');
-      const cont = { todos: this._tickets.length, nuevo: 0, en_progreso: 0, completado: 0 };
+      const cont = { todos: this._tickets.length, nuevo: 0, en_progreso: 0, esperando_cliente: 0, completado: 0 };
       this._tickets.forEach(t => { if (cont[t.status] != null) cont[t.status]++; });
       const chips = FILTROS.map(([k, lbl]) =>
         `<button class="tkfil ${this._filtro === k ? 'tkfil--on' : ''}" data-tkfiltro="${k}">${lbl}<span class="tkfil__n">${cont[k]}</span></button>`).join('');
@@ -204,6 +205,23 @@
       }
     },
 
+    // Cambiar el estado del ticket (solo super; incluye "Esperando cliente"). Lo valida el backend.
+    async cambiarEstado(id, status) {
+      const h = { 'Content-Type': 'application/json' };
+      if (global.Auth && Auth.currentToken) h['Authorization'] = 'Bearer ' + Auth.currentToken;
+      try {
+        const r = await fetch('/api/tickets/' + encodeURIComponent(id), { method: 'PATCH', headers: h, body: JSON.stringify({ status }) });
+        const d = await r.json().catch(() => null);
+        if (!r.ok || !d || d.error) throw new Error((d && d.error) || 'Error ' + r.status);
+        const t = this._tickets.find(x => String(x.id) === String(id));
+        if (t) t.status = d.status || status;
+        this.abrirDetalle(id);   // re-pinta badge/estado
+        if (global.UI && UI.toast) UI.toast('Estado actualizado');
+      } catch (e) {
+        if (global.UI && UI.toast) UI.toast('No se pudo cambiar el estado: ' + e.message);
+      }
+    },
+
     // Calificación (1–5) de la resolución. Solo la puede poner quien creó el ticket.
     async calificar(id, rating) {
       const h = { 'Content-Type': 'application/json' };
@@ -272,7 +290,9 @@
           <button class="tkdet__back" data-tkback>‹ Volver a la lista</button>
           <h3 class="tkdet__title">${esc(t.title)}</h3>
           <div class="tkdet__badges">
-            <span class="tkitem__est tkitem__est--${cls}">${et}</span>
+            ${this._super
+              ? `<select class="tkbadge tkest-sel tkest-sel--${cls}" data-tkest="${esc(t.id)}" title="Cambiar estado (super admin)">${ESTADOS.map(s => `<option value="${s}"${s === t.status ? ' selected' : ''}>${EST[s][0]}</option>`).join('')}</select>`
+              : `<span class="tkitem__est tkitem__est--${cls}">${et}</span>`}
             <span class="tkbadge tkbadge--${pr}">${esc(PRI[pr] || pr)}</span>
             ${this._super
               ? `<select class="tkbadge tkcat-sel" data-tkcat="${esc(t.id)}" title="Cambiar categoría (super admin)">${CATEGORIAS.map(c => `<option value="${esc(c)}"${c === t.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}${(t.category && !CATEGORIAS.includes(t.category)) ? `<option value="${esc(t.category)}" selected>${esc(t.category)}</option>` : ''}</select>`
@@ -298,11 +318,13 @@
                 : (t.rating != null
                     ? `${estrellasHtml(t.rating, false)}<span class="tkrate__val">${t.rating}/5</span>`
                     : `<span class="tkrate__hint">Sin calificar aún.</span>`)}
-            </div>
-            ${t.mine ? `<div class="tkmycom">
-              <textarea id="tkMyCom" class="tkmycom__ta" rows="2" maxlength="4000" placeholder="Escribe un comentario sobre la resolución…"></textarea>
-              <button class="tkmycom__btn" data-tkmycom="${esc(t.id)}">Enviar comentario</button>
-            </div>` : ''}` : ''}
+            </div>` : ''}
+          ${(t.mine && (t.status === 'completado' || t.status === 'esperando_cliente')) ? `
+            ${t.status === 'esperando_cliente' ? `<div class="tkmycom__wait">❓ Están esperando tu respuesta para continuar con el ticket.</div>` : ''}
+            <div class="tkmycom">
+              <textarea id="tkMyCom" class="tkmycom__ta" rows="2" maxlength="4000" placeholder="${t.status === 'esperando_cliente' ? 'Escribe tu aclaración…' : 'Escribe un comentario sobre la resolución…'}"></textarea>
+              <button class="tkmycom__btn" data-tkmycom="${esc(t.id)}">${t.status === 'esperando_cliente' ? 'Responder' : 'Enviar comentario'}</button>
+            </div>` : ''}
           ${this._super ? `<div class="tkdet__danger"><button class="tkdel" data-tkdel="${esc(t.id)}">🗑 Borrar ticket</button></div>` : ''}
         </div>`;
     },
@@ -479,6 +501,8 @@
       modal.addEventListener('change', e => {
         const catSel = e.target.closest('[data-tkcat]');
         if (catSel) return this.cambiarCategoria(catSel.dataset.tkcat, catSel.value);
+        const estSel = e.target.closest('[data-tkest]');
+        if (estSel) return this.cambiarEstado(estSel.dataset.tkest, estSel.value);
         const map = { tkPrio: '_prio', tkCat: '_cat', tkDias: '_dias', tkOrden: '_orden' };
         const k = map[e.target.id];
         if (k) { this[k] = e.target.value; this.pintarItems(); }

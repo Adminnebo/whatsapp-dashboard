@@ -1762,11 +1762,19 @@ app.patch('/api/tickets/:id', needSuper, wrap(async (req, res) => {
   const sets = [], vals = [id];
   if (b.category !== undefined) { vals.push(b.category == null ? null : String(b.category).slice(0, 60)); sets.push(`category = $${vals.length}`); }
   if (b.priority !== undefined) { vals.push(b.priority == null ? null : String(b.priority).slice(0, 40)); sets.push(`priority = $${vals.length}`); }
-  if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar (category / priority)' });
+  if (b.status !== undefined) {
+    const ESTADOS = ['nuevo', 'en_progreso', 'esperando_cliente', 'completado'];
+    const st = String(b.status || '').toLowerCase();
+    if (!ESTADOS.includes(st)) return res.status(400).json({ error: 'Estado inválido' });
+    vals.push(st); sets.push(`status = $${vals.length}`);
+    // Al pasar a completado se sella completed_at; al salir de completado se limpia.
+    sets.push(st === 'completado' ? `completed_at = COALESCE(completed_at, now())` : `completed_at = NULL`);
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nada que actualizar (category / priority / status)' });
   sets.push('updated_at = now()');
-  const r = await q(`UPDATE tickets SET ${sets.join(', ')} WHERE id = $1 RETURNING id, category, priority`, vals);
+  const r = await q(`UPDATE tickets SET ${sets.join(', ')} WHERE id = $1 RETURNING id, category, priority, status`, vals);
   if (!r.rows[0]) return res.status(404).json({ error: 'Ticket no encontrado' });
-  res.json({ ok: true, id: String(r.rows[0].id), category: r.rows[0].category, priority: r.rows[0].priority });
+  res.json({ ok: true, id: String(r.rows[0].id), category: r.rows[0].category, priority: r.rows[0].priority, status: r.rows[0].status });
 }));
 
 // Borrar un ticket por completo (solo super_admin). Se lleva sus comentarios y adjuntos.
@@ -1825,7 +1833,9 @@ app.post('/api/tickets/comment-mine', wrap(async (req, res) => {
     `INSERT INTO ticket_comments (ticket_id, author, author_email, body, source)
      VALUES ($1,$2,$3,$4,'cliente') RETURNING id, EXTRACT(EPOCH FROM created_at)*1000 AS created_at`,
     [t.id, String(author).slice(0, 120), authorEmail && authorEmail.slice(0, 160), body.slice(0, 4000)]);
-  await q(`UPDATE tickets SET updated_at = now() WHERE id = $1`, [t.id]);
+  // Si estaba "esperando cliente", la respuesta del cliente lo devuelve a "en progreso".
+  await q(`UPDATE tickets SET status = CASE WHEN status = 'esperando_cliente' THEN 'en_progreso' ELSE status END,
+             updated_at = now() WHERE id = $1`, [t.id]);
 
   res.json({
     ok: true,
@@ -1980,18 +1990,30 @@ app.post('/api/tickets/comment', wrap(async (req, res) => {
      VALUES ($1,$2,$3,$4,'api') RETURNING id, EXTRACT(EPOCH FROM created_at)*1000 AS created_at`,
     [t.id, author, authorEmail, body.slice(0, 4000)]);
   const cid = ins.rows[0].id;
-  await q(`UPDATE tickets SET updated_at = now() WHERE id = $1`, [t.id]);
+  // ¿La respuesta pide una ACLARACIÓN al cliente? → pasa el ticket a "esperando cliente".
+  // Se activa con { waitingCustomer:true } (o esperando/waiting_customer) o status=esperando_cliente.
+  const statusHint = String(buscarCampo(b, ['status', 'estado', 'state']) || '').toLowerCase();
+  const esperando = b.waitingCustomer === true || b.esperando === true || b.waiting_customer === true
+    || /esperand|waiting|aclarac|await/.test(statusHint);
+  let nuevoStatus = null;
+  if (esperando) {
+    const up = await q(`UPDATE tickets SET status = 'esperando_cliente', updated_at = now()
+                        WHERE id = $1 AND status <> 'completado' RETURNING status`, [t.id]);
+    nuevoStatus = up.rows[0] ? up.rows[0].status : null;
+  } else {
+    await q(`UPDATE tickets SET updated_at = now() WHERE id = $1`, [t.id]);
+  }
 
   // Notifica al autor del ticket que hay una respuesta nueva.
   if (t.user_id) {
     await notify({
       type: 'ticket', userId: t.user_id,
-      title: '💬 Respondieron tu ticket',
+      title: esperando ? '❓ Tu ticket necesita una aclaración' : '💬 Respondieron tu ticket',
       body: author + ': ' + (body.length > 140 ? body.slice(0, 140) + '…' : body),
       refId: 'ticket-comment-' + cid
     });
   }
-  res.json({ ok: true, id: String(cid), ticketId: String(t.id), createdAt: Number(ins.rows[0].created_at) || 0 });
+  res.json({ ok: true, id: String(cid), ticketId: String(t.id), status: nuevoStatus || undefined, createdAt: Number(ins.rows[0].created_at) || 0 });
 }));
 
 // Envía una plantilla aprobada. Es lo ÚNICO que Meta deja mandar fuera de la
