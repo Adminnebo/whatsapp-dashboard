@@ -493,6 +493,10 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
   display: flex; align-items: center; gap: 8px; padding: 9px 18px; font-size: 13px;
 }
 .window-warn svg { width: 18px; height: 18px; fill: #d99100; flex-shrink: 0; }
+/* Variante informativa (verde): fuera de 24h pero SÍ puedes responder (agente humano) */
+.window-warn--info { background: #eaf7ef; border-top-color: #b7e4c7; color: #1a7a43; }
+.window-warn--info svg { fill: #1aa179; }
+[data-theme="dark"] .window-warn--info { background: #10241a; border-top-color: #1f4a33; color: #6ee7a8; }
 
 /* ============ COMPOSER ============ */
 .composer { background: var(--panel); border-top: 1px solid var(--border); padding: 8px 16px 12px; }

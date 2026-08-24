@@ -207,6 +207,26 @@
       box.replaceChildren(frag);
     },
 
+    // Estado de la ventana de mensajería según canal y último mensaje entrante.
+    //  whatsapp:   ≤24h libre · >24h solo plantilla aprobada
+    //  ig/facebook: ≤24h libre · 24h–7d solo agente humano · >7d cerrada
+    //  pagina_web:  sin ventana (chat en vivo)
+    windowState(conv) {
+      const canal = conv.channel || 'whatsapp';
+      const li = Number(conv.lastInbound) || 0;
+      const elapsed = li ? Date.now() - li : Infinity;
+      const H24 = 24 * 3600 * 1000, D7 = 7 * 24 * 3600 * 1000;
+      const nombreCanal = { instagram: 'Instagram', facebook: 'Facebook' }[canal] || canal;
+      if (canal === 'pagina_web') return { state: 'free' };
+      if (elapsed <= H24) return { state: 'free' };
+      if (canal === 'whatsapp')
+        return { state: 'wa', tone: 'warn', html: 'Fuera de la ventana de 24 h. Solo puedes enviar una <strong>plantilla aprobada</strong> por Meta.' };
+      // instagram / facebook
+      if (elapsed <= D7)
+        return { state: 'human', tone: 'info', html: `Fuera de las 24 h en <strong>${nombreCanal}</strong>. Puedes responder <strong>como agente humano</strong> hasta 7 días después del último mensaje del cliente (no promociones).` };
+      return { state: 'closed', tone: 'warn', html: `Pasaron más de <strong>7 días</strong> desde el último mensaje. Meta no permite reabrir esta conversación de <strong>${nombreCanal}</strong>; espera a que el cliente escriba.` };
+    },
+
     // ---------- hilo de mensajes ----------
     renderThread() {
       const conv = Store.activeConversation();
@@ -250,9 +270,16 @@
       this._threadConvId = conv.id;
       this._threadContactName = conv.name;   // autor de las citas a mensajes entrantes
 
-      // aviso ventana 24h: es una regla de WhatsApp (plantillas de Meta), no de los demás canales
-      const outOfWindow = conv.channel === 'whatsapp' && conv.lastInbound && (Date.now() - conv.lastInbound) > 24 * 3600 * 1000;
-      $('#windowWarn').hidden = !outOfWindow;
+      // Aviso de ventana de mensajería (según canal): WhatsApp=plantilla, IG/FB=agente humano/cerrada.
+      const ws = this.windowState(conv);
+      const warn = $('#windowWarn');
+      if (ws.state === 'free') warn.hidden = true;
+      else {
+        warn.hidden = false;
+        warn.classList.toggle('window-warn--info', ws.tone === 'info');   // ámbar (informativo) vs rojo (bloqueante)
+        const span = warn.querySelector('span');
+        if (span) span.innerHTML = ws.html;
+      }
 
       this.renderDetails(conv);
     },
