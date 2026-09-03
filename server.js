@@ -2098,10 +2098,32 @@ app.post('/api/send-template', need('inbox.templates'), wrap(async (req, res) =>
   const b = req.body || {};
   const name = String(b.name || '').trim();
   const lang = String(b.language || '').trim() || 'es';
-  const to = b.to ? String(b.to).replace(/[^\d]/g, '') : null;
   if (!name) return res.status(400).json({ ok: false, error: 'Falta el nombre de la plantilla' });
-  if (!to) return res.status(400).json({ ok: false, error: 'El contacto no tiene teléfono' });
   if (!WA_TOKEN || !WA_PHONE) return res.status(400).json({ ok: false, error: 'WhatsApp no está configurado' });
+
+  // Un contacto puede no tener teléfono y sí user_id (el XX.123456... que manda
+  // Meta cuando el número no viaja en el payload). El envío normal ya resuelve
+  // ese caso con waDestino; la plantilla no lo hacía y fallaba con "no tiene
+  // teléfono" justo en la única vía que Meta permite fuera de las 24 h.
+  let to = b.to ? String(b.to).replace(/[^\d]/g, '') : null;
+  let userId = b.userId ? String(b.userId).trim() : null;
+  const convId = String(b.conversationId || '').replace(/[^0-9]/g, '');
+  const cid = b.contactId ? String(b.contactId).trim() : null;
+  if ((!to || !userId) && (convId || cid)) {
+    const rc = await q(
+      `SELECT c.phone, c.user_id FROM contacts c
+       LEFT JOIN conversations cv ON cv.contact_id = c.id
+       WHERE ($1::bigint IS NOT NULL AND cv.id = $1::bigint)
+          OR ($2::text   IS NOT NULL AND (c.ghl_contact_id = $2 OR c.user_id = $2))
+       ORDER BY cv.id DESC LIMIT 1`, [convId || null, cid]);
+    const row = rc.rows[0];
+    if (row) {
+      if (!to) to = row.phone ? String(row.phone).replace(/[^\d]/g, '') : null;
+      userId = userId || row.user_id || null;
+    }
+  }
+  const dest = waDestino(to, userId);
+  if (!dest) return res.status(400).json({ ok: false, error: 'El contacto no tiene teléfono válido ni user_id' });
 
   const txt = v => ({ type: 'text', text: String(v == null ? '' : v) });
   const headerParams = Array.isArray(b.headerParams) ? b.headerParams : [];
@@ -2125,7 +2147,7 @@ app.post('/api/send-template', need('inbox.templates'), wrap(async (req, res) =>
   }));
 
   const payload = {
-    messaging_product: 'whatsapp', to, type: 'template',
+    messaging_product: 'whatsapp', ...dest, type: 'template',
     template: { name, language: { code: lang }, ...(components.length ? { components } : {}) }
   };
   const r = await waSend(payload);
@@ -2137,7 +2159,7 @@ app.post('/api/send-template', need('inbox.templates'), wrap(async (req, res) =>
   // `name` es el nombre del CONTACTO (lo pisaría en la base).
   const texto = fillVars(b.preview || '', bodyParams) || ('[plantilla] ' + name);
   const n = normalize({
-    contactId: b.contactId || null, name: b.contactName || null, phone: to,
+    contactId: b.contactId || null, name: b.contactName || null, phone: dest.to || null, userId,
     text: texto, wamid, type: 'text', channel: 'whatsapp', status: 'sent'
   }, null, 'out');
   n.sentBy = await agentName(req);

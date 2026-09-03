@@ -555,7 +555,11 @@
 
       const payload = {
         name: tpl.name, language: tpl.language,
-        to: conv.phone, contactId: conv.contactId, contactName: conv.name,
+        // Se manda el user_id y el id de la conversación además del teléfono: un
+        // contacto que llegó sin número solo se puede alcanzar por user_id, y sin
+        // esto el servidor no tenía con qué resolverlo.
+        to: conv.phone, userId: conv.userId, conversationId: conv.id,
+        contactId: conv.contactId, contactName: conv.name,
         bodyParams, headerParams, buttonParams,
         preview: tpl.body.text
       };
