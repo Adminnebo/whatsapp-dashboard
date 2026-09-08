@@ -9,7 +9,7 @@
 (function (global) {
   'use strict';
 
-  const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas'];
+  const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas', 'jarvis'];
 
   const GRUPOS = [
     {
@@ -48,6 +48,14 @@
         { key: 'cobranzas.cliente_toggle', label: 'Habilitar/deshabilitar cliente', sensible: true },
         { key: 'cobranzas.llamadas',       label: 'Lanzar llamadas / cola', sensible: true },
         { key: 'cobranzas.horario',        label: 'Editar horario de llamadas', sensible: true }
+      ]
+    },
+    {
+      platform: 'jarvis', label: 'Jarvis — Asistente',
+      perms: [
+        { key: 'jarvis.usar',  label: 'Usar Jarvis' },
+        { key: 'jarvis.admin', label: 'Administrar Jarvis (fuentes, credenciales, consumo)',
+          sensible: true }
       ]
     }
   ];
