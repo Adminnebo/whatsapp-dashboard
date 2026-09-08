@@ -873,6 +873,18 @@
           }
           // Permisos granulares: oculta secciones/botones que el usuario no tiene.
           if (global.PERMS) { PERMS.set(me && me.permissions); PERMS.aplicar(); }
+          // Acceso directo a Jarvis: el token va en el fragmento de la URL, no en
+          // la query, asi que no llega al servidor de Jarvis dentro de la URL y
+          // no queda en sus logs de acceso ni se filtra por la cabecera Referer.
+          const btnJarvis = document.querySelector('#btnJarvis');
+          if (btnJarvis) {
+            btnJarvis.addEventListener('click', () => {
+              window.open(
+                'https://jarvis-production-71c4.up.railway.app/entrar#t=' + encodeURIComponent(Auth.currentToken),
+                '_blank'
+              );
+            });
+          }
           // Accesos a las otras plataformas según el acceso del usuario.
           const tienePlat = k => !Array.isArray(plats) || !plats.length || plats.includes(k);
           const gc = document.querySelector('#goCotiz'); if (gc && tienePlat('cotizaciones')) gc.hidden = false;
