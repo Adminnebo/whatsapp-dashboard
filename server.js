@@ -146,10 +146,31 @@ const SIN_PLATAFORMA = new Set(['/tickets', '/tickets/rate', '/tickets/comment-m
 // (n8n/Meta: save-in/out, ghl/contact, message-cost, webhooks…) van EXENTOS:
 // traen su propia API key/firma y deben aguantar ráfagas de concurrencia.
 const esMaquina = req => OPEN_API.has(req.path);
+// Clave del rate limit: por USUARIO cuando hay sesión (el `sub` del token de
+// Supabase, estable entre refrescos), con fallback a IP. El limiter corre antes
+// del auth, así que leemos el `sub` del JWT sin verificarlo: para agrupar cubos
+// no necesita ser seguro (falsificar el token solo te da tu propio cubo). Sin
+// esto, toda una oficina tras una sola IP/NAT comparte un único cupo de 300/min.
+function bucketKey(req) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : (req.headers['x-access-token'] || '');
+  if (token) {
+    try {
+      const p = token.split('.')[1];
+      if (p) {
+        const json = Buffer.from(p.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+        const sub = JSON.parse(json).sub;
+        if (sub) return 'u:' + sub;
+      }
+    } catch (_) { /* token raro: cae a IP */ }
+  }
+  return 'ip:' + (req.ip || 'unknown');
+}
 app.use('/api', rateLimit({
   windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS || 60000),
   max: Number(process.env.RATE_LIMIT_USER || 300),
-  skip: esMaquina
+  skip: esMaquina,
+  key: bucketKey
 }));
 
 app.use('/api', (req, res, next) => {

@@ -41,14 +41,17 @@ function hardening(app) {
   app.use(securityHeaders);
 }
 
-// Rate limit en memoria, ventana fija por IP.
-// opts: { windowMs, max, skip(req)->bool, message }
+// Rate limit en memoria, ventana fija. Agrupa por IP salvo que se pase `key`
+// (p.ej. por usuario logueado, para que una oficina tras una sola IP/NAT no
+// comparta un único cupo entre todos sus agentes).
+// opts: { windowMs, max, skip(req)->bool, key(req)->string, message }
 function rateLimit(opts = {}) {
   const windowMs = opts.windowMs || 60000;
   const max = opts.max || 300;
   const skip = opts.skip || (() => false);
+  const keyOf = opts.key || (req => 'ip:' + (req.ip || (req.connection && req.connection.remoteAddress) || 'unknown'));
   const message = opts.message || 'Demasiadas solicitudes. Espera un momento e intenta de nuevo.';
-  const hits = new Map();            // ip -> { count, reset }
+  const hits = new Map();            // key -> { count, reset }
 
   const limpieza = setInterval(() => {
     const now = Date.now();
@@ -59,9 +62,9 @@ function rateLimit(opts = {}) {
   return function (req, res, next) {
     if (skip(req)) return next();
     const now = Date.now();
-    const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
-    let e = hits.get(ip);
-    if (!e || e.reset <= now) { e = { count: 0, reset: now + windowMs }; hits.set(ip, e); }
+    const bucket = keyOf(req);
+    let e = hits.get(bucket);
+    if (!e || e.reset <= now) { e = { count: 0, reset: now + windowMs }; hits.set(bucket, e); }
     e.count++;
     const restante = Math.max(0, max - e.count);
     const resetSecs = Math.ceil((e.reset - now) / 1000);
