@@ -19,7 +19,7 @@
 'use strict';
 
 // Plataformas (coinciden con profiles.platforms y con el prefijo de cada permiso).
-const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas'];
+const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas', 'jarvis'];
 
 // Grupos = una plataforma con sus funcionalidades. `sensible` marca acciones
 // peligrosas o de coste (se pintan aparte en el panel).
@@ -61,6 +61,14 @@ const GRUPOS = [
       { key: 'cobranzas.llamadas',       label: 'Lanzar llamadas / cola', sensible: true },
       { key: 'cobranzas.horario',        label: 'Editar horario de llamadas', sensible: true }
     ]
+  },
+  {
+    platform: 'jarvis', label: 'Jarvis — Asistente',
+    perms: [
+      { key: 'jarvis.usar',  label: 'Usar Jarvis' },
+      { key: 'jarvis.admin', label: 'Administrar Jarvis (fuentes, credenciales, consumo)',
+        sensible: true }
+    ]
   }
 ];
 
@@ -84,7 +92,10 @@ function permisosDe(profile) {
   // Sin permisos explícitos: derivar de las plataformas (usuario pre-migración).
   const plats = profile && profile.platforms;
   if (Array.isArray(plats)) return ALL_KEYS.filter(k => plats.includes(platformDeKey(k)));
-  return ALL_KEYS.slice();   // sin nada definido: acceso total (no romper)
+  // Sin nada definido: acceso total para no romper a nadie, PERO sin Jarvis.
+  // El asistente lee bases de datos y gasta creditos: se entra solo si alguien
+  // lo concedio a proposito.
+  return ALL_KEYS.filter(k => platformDeKey(k) !== 'jarvis');
 }
 
 // Plataformas a las que accede (tiene ≥1 permiso de ese prefijo). Mantiene vivo
