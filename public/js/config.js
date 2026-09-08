@@ -12,6 +12,7 @@ window.WA_CONFIG = {
   ghlUrl:       '/api/ghl-contact',
   ghlFieldUrl:  '/api/ghl-set-field',
   ghlNameUrl:   '/api/ghl-name',
+  ghlNamesUrl:  '/api/ghl-names',   // batch: varios nombres en 1 request
   botStateUrl:  '/api/bot-state',
   botSetUrl:    '/api/bot-set',
   handoffUrl:   '/api/handoff',

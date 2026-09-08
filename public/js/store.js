@@ -18,6 +18,7 @@
     ghlUrl: cfg.ghlUrl || '',          // GET   -> datos del contacto en GoHighLevel
     ghlFieldUrl: cfg.ghlFieldUrl || '',// POST  -> escribe custom field (bot_status) en GHL
     ghlNameUrl: cfg.ghlNameUrl || '',  // GET   -> nombre del contacto en GHL (liviano)
+    ghlNamesUrl: cfg.ghlNamesUrl || '',// GET   -> varios nombres de GHL en 1 request (batch)
     botStateUrl: cfg.botStateUrl || '',// GET   -> estado del chatbot (activo/inactivo)
     botSetUrl: cfg.botSetUrl || '',    // POST  -> prender/apagar el chatbot
     handoffUrl: cfg.handoffUrl || '',  // GET   -> contactIds con etiqueta handoff en GHL

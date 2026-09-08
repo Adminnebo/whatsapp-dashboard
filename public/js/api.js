@@ -194,6 +194,14 @@
       return await http(url, { method: 'GET', headers: headers() });
     },
 
+    // Batch: resuelve varios nombres en UNA sola request -> { names: { id: name|null } }.
+    async getGhlNames(ids) {
+      const base = S().ghlNamesUrl;
+      if (!base || !ids || !ids.length) return { names: {} };
+      const url = base + (base.includes('?') ? '&' : '?') + 'ids=' + encodeURIComponent(ids.join(','));
+      return await http(url, { method: 'GET', headers: headers() });
+    },
+
     // ---------------------------------------------------------------
     // Escribe el custom field bot_status del contacto en GHL.
     // value: 'STOP' (cerrar → detener bot) o '' (abrir → reactivar).

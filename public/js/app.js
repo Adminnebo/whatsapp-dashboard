@@ -162,18 +162,25 @@
     // Rellena nombres faltantes ("?", teléfonos, ". .") con el nombre de GHL.
     // Solo consulta las que no tienen nombre válido; reusa la caché (sin repetir llamadas).
     async enrichNames() {
-      if (!Store.settings.ghlNameUrl) return;
+      if (!Store.settings.ghlNamesUrl && !Store.settings.ghlNameUrl) return;
       // primero aplica lo ya cacheado (tras un poll, sin llamadas nuevas)
       this.applyResolvedNames();
       const need = Store.conversations.filter(c => c.contactId && !this.isValidName(c.name) && !(c.contactId in Store.nameByContact));
       if (!need.length) return;
-      const CAP = 5; // llamadas concurrentes máximas
-      for (let i = 0; i < need.length; i += CAP) {
-        const batch = need.slice(i, i + CAP);
-        await Promise.all(batch.map(async c => {
-          try { const d = await Api.getGhlName(c.contactId); Store.nameByContact[c.contactId] = (d && d.ok && this.isValidName(d.name)) ? String(d.name).trim() : null; }
-          catch (_) { Store.nameByContact[c.contactId] = null; }
-        }));
+      const ids = [...new Set(need.map(c => c.contactId))];
+      const CHUNK = 100; // ids por request batch (el server también topa en 100)
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const slice = ids.slice(i, i + CHUNK);
+        try {
+          const d = await Api.getGhlNames(slice);
+          const names = (d && d.names) || {};
+          for (const id of slice) {
+            const nm = names[id];
+            Store.nameByContact[id] = (nm && this.isValidName(nm)) ? String(nm).trim() : null;
+          }
+        } catch (_) {
+          for (const id of slice) Store.nameByContact[id] = null;
+        }
         this.applyResolvedNames();
       }
     },

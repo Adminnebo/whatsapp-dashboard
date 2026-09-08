@@ -1128,13 +1128,46 @@ app.get('/api/bot-status', wrap(async (req, res) => {
 }));
 
 // ---- GHL ----
-app.get('/api/ghl-name', wrap(async (req, res) => {
-  const id = String(req.query.contactId || '').trim();
-  if (!id) return res.json({ ok: false, name: '' });
+// Caché de nombres en memoria: evita repegarle a GHL por el mismo contacto en
+// cada recarga del panel (la caché del cliente se pierde al refrescar).
+const ghlNameCache = new Map();          // id -> { ok, name, phone, exp }
+const GHL_NAME_TTL = 10 * 60 * 1000;     // 10 min
+
+async function resolveGhlName(id) {
+  id = String(id || '').trim();
+  if (!id) return { ok: false, name: '', phone: null };
+  const hit = ghlNameCache.get(id);
+  if (hit && hit.exp > Date.now()) return { ok: hit.ok, name: hit.name, phone: hit.phone };
   const { json } = await ghl('/contacts/' + encodeURIComponent(id));
   const c = (json && json.contact) || {};
   const name = [c.firstName, c.lastName].filter(Boolean).join(' ').trim() || c.contactName || c.name || '';
-  res.json({ ok: !!c.id, name, phone: c.phone || null });
+  const out = { ok: !!c.id, name, phone: c.phone || null };
+  ghlNameCache.set(id, { ...out, exp: Date.now() + GHL_NAME_TTL });
+  return out;
+}
+
+app.get('/api/ghl-name', wrap(async (req, res) => {
+  const id = String(req.query.contactId || '').trim();
+  if (!id) return res.json({ ok: false, name: '' });
+  res.json(await resolveGhlName(id));
+}));
+
+// Batch: resuelve varios nombres en UNA sola request -> { names: { id: name|null } }.
+// El panel antes pedía 1 request por contacto (40+ al cargar), reventando el
+// rate limit. Ahora manda todos los ids juntos (ids=coma,separada).
+app.get('/api/ghl-names', wrap(async (req, res) => {
+  const raw = String(req.query.ids || '');
+  const uniq = [...new Set(raw.split(',').map(s => s.trim()).filter(Boolean))].slice(0, 100);
+  const names = {};
+  const CAP = 5;                         // concurrencia contra GHL
+  for (let i = 0; i < uniq.length; i += CAP) {
+    const slice = uniq.slice(i, i + CAP);
+    await Promise.all(slice.map(async id => {
+      try { const d = await resolveGhlName(id); names[id] = (d.ok && d.name) ? d.name : null; }
+      catch (_) { names[id] = null; }
+    }));
+  }
+  res.json({ ok: true, names });
 }));
 
 app.get('/api/ghl-contact', wrap(async (req, res) => {
