@@ -54,5 +54,27 @@ prueba('tener jarvis.usar da acceso a la plataforma jarvis', () => {
   assert.ok(plats.includes('jarvis'));
 });
 
+// A "Pagos" se entra igual que a Jarvis: solo si el super admin lo marco.
+const pagos = k => String(k).startsWith('pagos.');
+
+prueba('el grupo pagos existe con su permiso', () => {
+  assert.ok(PERMS.PLATAFORMAS.includes('pagos'));
+  assert.ok(PERMS.ALL_KEYS.includes('pagos.ver'));
+});
+
+prueba('ningun respaldo regala pagos', () => {
+  assert.strictEqual(PERMS.permisosDe({ role: 'agent' }).filter(pagos).length, 0);
+  const viejo = PERMS.permisosDe({
+    role: 'agent', permissions: null,
+    platforms: ['inbox', 'cotizaciones', 'cobranzas'],
+  });
+  assert.strictEqual(viejo.filter(pagos).length, 0);
+});
+
+prueba('pagos.ver explicito se conserva y super_admin lo tiene', () => {
+  assert.deepStrictEqual(PERMS.permisosDe({ role: 'agent', permissions: ['pagos.ver'] }), ['pagos.ver']);
+  assert.ok(PERMS.permisosDe({ role: 'super_admin' }).includes('pagos.ver'));
+});
+
 if (fallos) { console.error(`\n${fallos} fallaron`); process.exit(1); }
 console.log('\nTodo correcto.');

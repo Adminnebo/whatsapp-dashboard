@@ -19,7 +19,7 @@
 'use strict';
 
 // Plataformas (coinciden con profiles.platforms y con el prefijo de cada permiso).
-const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas', 'jarvis'];
+const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas', 'jarvis', 'pagos'];
 
 // Grupos = una plataforma con sus funcionalidades. `sensible` marca acciones
 // peligrosas o de coste (se pintan aparte en el panel).
@@ -69,6 +69,12 @@ const GRUPOS = [
       { key: 'jarvis.admin', label: 'Administrar Jarvis (fuentes, credenciales, consumo)',
         sensible: true }
     ]
+  },
+  {
+    platform: 'pagos', label: 'Pagos — Lo que se debe',
+    perms: [
+      { key: 'pagos.ver', label: 'Ver acceso directo a lo que se debe' }
+    ]
   }
 ];
 
@@ -92,10 +98,11 @@ function permisosDe(profile) {
   // Sin permisos explícitos: derivar de las plataformas (usuario pre-migración).
   const plats = profile && profile.platforms;
   if (Array.isArray(plats)) return ALL_KEYS.filter(k => plats.includes(platformDeKey(k)));
-  // Sin nada definido: acceso total para no romper a nadie, PERO sin Jarvis.
-  // El asistente lee bases de datos y gasta creditos: se entra solo si alguien
-  // lo concedio a proposito.
-  return ALL_KEYS.filter(k => platformDeKey(k) !== 'jarvis');
+  // Sin nada definido: acceso total para no romper a nadie, PERO sin Jarvis ni
+  // Pagos. El asistente lee bases de datos y gasta creditos, y lo que se debe
+  // solo lo ve quien eligio el super admin: se entra solo si alguien lo
+  // concedio a proposito.
+  return ALL_KEYS.filter(k => !['jarvis', 'pagos'].includes(platformDeKey(k)));
 }
 
 // Plataformas a las que accede (tiene ≥1 permiso de ese prefijo). Mantiene vivo
