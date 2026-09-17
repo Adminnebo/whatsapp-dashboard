@@ -6,6 +6,8 @@
 
   const $ = sel => document.querySelector(sel);
   let pollTimer = null;
+  // Página de pago de lo que se debe (la muestra el botón 💳, solo con pagos.ver).
+  const PAGOS_URL = 'https://app.swordaisolutions.com/pay/d88e8d1ea5e5ff6ce37d500263adc1a75117da6b5e968bd9?embed=1';
 
   const App = {
     async init() {
@@ -884,6 +886,19 @@
                 '_blank'
               );
             });
+          }
+          // Acceso directo a lo que se debe (solo con pagos.ver). El iframe se
+          // carga al abrir, así nadie más descarga la página de pago.
+          const btnPagos = document.querySelector('#btnPagos');
+          const pagosModal = document.querySelector('#pagosModal');
+          if (btnPagos && pagosModal) {
+            const pagosFrame = document.querySelector('#pagosFrame');
+            btnPagos.addEventListener('click', () => {
+              if (pagosFrame.src === 'about:blank') pagosFrame.src = PAGOS_URL;
+              pagosModal.hidden = false;
+            });
+            pagosModal.querySelectorAll('[data-pclose]').forEach(b => b.addEventListener('click', () => { pagosModal.hidden = true; }));
+            document.addEventListener('keydown', e => { if (e.key === 'Escape') pagosModal.hidden = true; });
           }
           // Accesos a las otras plataformas según el acceso del usuario.
           const tienePlat = k => !Array.isArray(plats) || !plats.length || plats.includes(k);

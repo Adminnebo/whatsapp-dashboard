@@ -582,6 +582,7 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .modal__head { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px; border-bottom: 1px solid var(--border); }
 .modal__head h2 { font-size: 17px; font-weight: 700; }
 .modal__body { padding: 20px 22px; overflow-y: auto; }
+.pagos__frame { display: block; width: 100%; height: 620px; max-height: calc(88vh - 60px); border: 0; }
 .modal__foot { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 10px; }
 
 .mode-switch { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }

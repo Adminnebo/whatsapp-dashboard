@@ -9,7 +9,7 @@
 (function (global) {
   'use strict';
 
-  const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas', 'jarvis'];
+  const PLATAFORMAS = ['inbox', 'cotizaciones', 'cobranzas', 'jarvis', 'pagos'];
 
   const GRUPOS = [
     {
@@ -56,6 +56,12 @@
         { key: 'jarvis.usar',  label: 'Usar Jarvis' },
         { key: 'jarvis.admin', label: 'Administrar Jarvis (fuentes, credenciales, consumo)',
           sensible: true }
+      ]
+    },
+    {
+      platform: 'pagos', label: 'Pagos — Lo que se debe',
+      perms: [
+        { key: 'pagos.ver', label: 'Ver acceso directo a lo que se debe' }
       ]
     }
   ];
