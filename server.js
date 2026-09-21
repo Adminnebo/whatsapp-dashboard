@@ -28,6 +28,29 @@ const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 const HANDOFF_TAG = process.env.HANDOFF_TAG || 'handoff';
 const CLIENT_CHARGE_OUT = Number(process.env.CLIENT_CHARGE_OUT || 0.03); // fallback si el modelo no está configurado
 
+// ── Contactos PROTEGIDOS ──────────────────────────────────────────────────────
+// Nunca entran en handoff, ni se apagan, ni se bloquean: Camila SIEMPRE responde.
+// Se ignora cualquier intento (manual, agente/n8n, bloqueo o escaneo de etiquetas)
+// de detener el bot para estos contactos, y /api/bot-status devuelve shouldReply=true
+// pase lo que pase (incluido el flag global). Configurable por env (CSV de ids/teléfonos).
+const PROTECTED_CONTACTS = new Set(
+  String(process.env.PROTECTED_CONTACTS || '573505903076')
+    .split(',').map(s => s.trim()).filter(Boolean)
+);
+const PROTECTED_DIGITS = new Set([...PROTECTED_CONTACTS].map(s => s.replace(/\D/g, '')).filter(Boolean));
+// ¿Alguno de estos identificadores (ghl_contact_id / user_id / phone, con o sin +) está protegido?
+function isProtected(...vals) {
+  for (const v of vals) {
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (!s) continue;
+    if (PROTECTED_CONTACTS.has(s)) return true;
+    const d = s.replace(/\D/g, '');
+    if (d && (PROTECTED_CONTACTS.has(d) || PROTECTED_DIGITS.has(d))) return true;
+  }
+  return false;
+}
+
 // ── Cobrado por modelo ───────────────────────────────────────────────────────
 // El cobrado ya no es fijo: sale del % configurado por modelo en Ajustes
 // (tabla pct_models, en esta misma base). charged = coste_ia × (1 + %/100).
@@ -1121,10 +1144,14 @@ app.get('/api/bot-status', wrap(async (req, res) => {
     }
   }
 
+  // Contacto protegido: Camila SIEMPRE responde, sin importar handoff/blocked/flag global.
+  const prot = isProtected(id);
+  if (prot) { handoff = false; blocked = false; }
+
   conversationOpen = !handoff;   // handoff = conversación en manual (bot detenido)
   const withinWindow = lastInboundAt != null ? (Date.now() - lastInboundAt) < 24 * 3600 * 1000 : true;
-  const shouldReply = botActive && !handoff && !blocked;   // bloqueado = el bot nunca responde
-  res.json({ ok: true, contactId: id || null, found, botActive, handoff, blocked, conversationOpen, lastInboundAt, withinWindow, shouldReply });
+  const shouldReply = prot ? true : (botActive && !handoff && !blocked);   // bloqueado = el bot nunca responde
+  res.json({ ok: true, contactId: id || null, found, botActive: prot ? true : botActive, handoff, blocked, conversationOpen, lastInboundAt, withinWindow, shouldReply, protected: prot || undefined });
 }));
 
 // ---- GHL ----
@@ -1271,6 +1298,13 @@ app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
   const c = before.rows[0];
   if (!c) return res.json({ ok: false, error: 'Contacto no encontrado' });
 
+  // Contacto protegido: no se puede apagar. Se ignora el intento y se deja a Camila ON.
+  if (closed && isProtected(c.ghl_contact_id, c.phone, c.user_id, contactId)) {
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [c.id]);
+    await logAction(req, 'conv_close_blocked', c.ghl_contact_id || String(c.id), 'Intento de apagar a Camila ignorado (contacto protegido)');
+    return res.json({ ok: true, contactId: c.ghl_contact_id, conversationId: c.conv_id ? String(c.conv_id) : null, handoff: false, protected: true });
+  }
+
   // GHL best-effort SOLO si el contacto tiene un ghl_contact_id real (IG/FB/web).
   if (c.ghl_contact_id) {
     try {
@@ -1358,6 +1392,17 @@ app.post('/api/handoff-set', wrap(async (req, res) => {
   const sbUser = row.user_id || (esMeta(row.ghl_contact_id) ? row.ghl_contact_id : (esMeta(ext) ? ext : null));
   const sbPhone = row.phone || (esTel(row.ghl_contact_id) ? row.ghl_contact_id : phoneIn);
 
+  // Contacto protegido: nunca entra en handoff. Se ignora el intento y se deja a Camila ON.
+  if (!active && isProtected(row.ghl_contact_id, row.phone, row.user_id, ext, phoneIn)) {
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [row.id]);
+    await mirrorBotActive({ phone: sbPhone, userId: sbUser, active: true });
+    await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
+             VALUES ('conv_open', 'Sistema (protegido)', $1, 'Handoff ignorado: contacto protegido')`, [row.ghl_contact_id]);
+    return res.json({ ok: true, handoff: false, contactId: String(row.id),
+      conversationId: row.conv_id ? String(row.conv_id) : null,
+      name: row.name, phone: row.phone, userId: row.user_id, protected: true });
+  }
+
   if (!active) {
     await q(`UPDATE contacts SET handoff = true, handoff_stopped = true,
                 handoff_at = COALESCE(handoff_at, now()) WHERE id = $1`, [row.id]);
@@ -1399,6 +1444,13 @@ app.post('/api/block-set', need('inbox.conversations'), wrap(async (req, res) =>
   const phoneIn = (b.phone || b.number) ? (String(b.phone || b.number).replace(/[^\d]/g, '') || null) : null;
   if (!convId && !ext && !phoneIn) return res.status(400).json({ error: 'Falta conversationId, id (user_id/phone) o phone' });
 
+  // Contacto protegido: no se puede bloquear. Se ignora el intento (desbloquear sí se permite).
+  if (block && isProtected(ext, phoneIn)) {
+    await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
+             VALUES ('contact_block_blocked', 'Sistema (protegido)', $1, 'Bloqueo ignorado: contacto protegido')`, [ext || phoneIn || null]);
+    return res.json({ ok: true, blocked: false, protected: true, contactId: null, phone: phoneIn });
+  }
+
   let row;
   if (convId) {
     const r = await q(`SELECT c.id, c.ghl_contact_id, c.name, c.phone, c.user_id, c.handoff, cv.id AS conv_id
@@ -1429,6 +1481,14 @@ app.post('/api/block-set', need('inbox.conversations'), wrap(async (req, res) =>
     return res.json({ ok: true, blocked: true, contactId: String(cid), conversationId: null, phone: norm, created: !ex.rows[0] });
   }
   if (!row) return res.status(404).json({ error: 'Contacto no encontrado' });
+
+  // Contacto protegido: no se puede bloquear (resuelto por conversationId u otro id).
+  if (block && isProtected(row.ghl_contact_id, row.phone, row.user_id, ext, phoneIn)) {
+    await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
+             VALUES ('contact_block_blocked', 'Sistema (protegido)', $1, 'Bloqueo ignorado: contacto protegido')`, [row.ghl_contact_id]);
+    return res.json({ ok: true, blocked: false, protected: true, contactId: String(row.id),
+      conversationId: row.conv_id ? String(row.conv_id) : null, name: row.name, phone: row.phone, userId: row.user_id });
+  }
 
   // Bot activo para ESTE contacto tras el cambio: solo si !handoff && !blocked.
   const botOn = !row.handoff && !block;
@@ -2384,7 +2444,10 @@ async function scanHandoff() {
     const nuevos = await q(
       `UPDATE contacts SET handoff = true, handoff_at = now()
        WHERE ghl_contact_id = ANY($1::text[]) AND handoff IS NOT TRUE
-       RETURNING id, ghl_contact_id, name, phone, user_id`, [ids]);
+         AND NOT (ghl_contact_id = ANY($2::text[]) OR user_id = ANY($2::text[])
+                  OR regexp_replace(COALESCE(phone,''), '\\D', '', 'g') = ANY($3::text[]))
+       RETURNING id, ghl_contact_id, name, phone, user_id`,
+      [ids, [...PROTECTED_CONTACTS], [...PROTECTED_DIGITS]]);
     for (const c of nuevos.rows) {
       const cv = await q(`SELECT id FROM conversations WHERE contact_id = $1 LIMIT 1`, [c.id]);
       await notify({
