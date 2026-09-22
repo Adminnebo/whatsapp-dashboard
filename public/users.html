@@ -83,7 +83,7 @@
     </div>
 
     <div class="card">
-      <h2>Usuarios (<span id="count">…</span>)</h2>
+      <h2>Usuarios (<span id="count">…</span>)<label id="verOcultosWrap" hidden style="float:right;font-weight:500;font-size:12px;color:#8b8f9a;cursor:pointer"><input type="checkbox" id="verOcultos" style="width:auto;margin-right:5px;vertical-align:middle"> ver ocultos</label></h2>
       <table>
         <thead><tr><th>Correo</th><th>Nombre</th><th>Rol</th><th>GHL</th><th>Último acceso</th><th></th></tr></thead>
         <tbody id="tbody"><tr><td colspan="6" class="dim">Cargando…</td></tr></tbody>
@@ -111,7 +111,7 @@
   <script src="js/permcatalog.js"></script>
   <script src="js/auth.js"></script>
   <script>
-    let ghlUsers = [], usersList = [], editingId = null;
+    let ghlUsers = [], usersList = [], editingId = null, myRole = null;
     const $ = s => document.querySelector(s);
 
     function ghlOptions(selected) {
@@ -124,6 +124,7 @@
     async function guard() {
       const s = await Auth.requireSession(); if (!s) return false;
       const me = await Auth.me();
+      myRole = me && me.profile ? me.profile.role : null;
       if (!me || !me.profile || !['admin', 'super_admin'].includes(me.profile.role)) {
         document.querySelector('.wrap').innerHTML = '<div class="card"><h2>Sin acceso</h2><p class="dim">Esta página es solo para administradores.</p><p style="margin-top:12px"><a href="/">← Volver</a></p></div>';
         return false;
@@ -169,14 +170,17 @@
     }
 
     async function loadUsers() {
-      const r = await Auth.fetch('/api/auth/users');
+      const canHide = myRole === 'super_admin';
+      const inc = (canHide && $('#verOcultos') && $('#verOcultos').checked) ? '?includeHidden=1' : '';
+      const r = await Auth.fetch('/api/auth/users' + inc);
       if (!r.ok) { $('#listMsg').className = 'msg msg--err'; $('#listMsg').textContent = 'Error al cargar usuarios'; return; }
+      $('#listMsg').textContent = '';
       const { users } = await r.json();
       usersList = users;
       $('#count').textContent = users.length;
       const ghlName = id => (ghlUsers.find(u => u.id === id) || {}).name || (id ? id : '—');
-      $('#tbody').innerHTML = users.map(u => `<tr data-id="${u.id}">
-        <td>${esc(u.email)}</td>
+      $('#tbody').innerHTML = users.map(u => `<tr data-id="${u.id}" style="${u.hidden ? 'opacity:.5' : ''}">
+        <td>${esc(u.email)}${u.hidden ? ' <span class="dim">(oculto)</span>' : ''}</td>
         <td>${esc(u.fullName || '—')}</td>
         <td><span class="pill pill--${u.role}">${u.role === 'super_admin' ? 'Super admin' : u.role === 'admin' ? 'Admin' : 'Agente'}</span></td>
         <td class="dim">${esc(ghlName(u.ghlUserId))}</td>
@@ -184,7 +188,7 @@
         <td class="row-actions">
           ${u.role === 'super_admin'
             ? '<span class="dim">Protegido</span>'
-            : '<button class="btn" data-act="edit">Editar</button> <button class="btn btn--danger" data-act="del">Eliminar</button>'}
+            : `<button class="btn" data-act="edit">Editar</button> ${canHide ? `<button class="btn" data-act="hide">${u.hidden ? 'Mostrar' : 'Ocultar'}</button> ` : ''}<button class="btn btn--danger" data-act="del">Eliminar</button>`}
         </td>
       </tr>`).join('') || '<tr><td colspan="6" class="dim">Sin usuarios.</td></tr>';
     }
@@ -213,6 +217,11 @@
         if (!confirm('¿Eliminar este usuario?')) return;
         const r = await Auth.fetch('/api/auth/users/' + id, { method: 'DELETE' });
         if (r.ok) loadUsers();
+      } else if (b.dataset.act === 'hide') {
+        const u = usersList.find(x => x.id === id);
+        const r = await Auth.fetch('/api/auth/users/' + id + '/hidden', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden: !(u && u.hidden) }) });
+        if (r.ok) loadUsers();
+        else { const d = await r.json().catch(() => ({})); $('#listMsg').className = 'msg msg--err'; $('#listMsg').textContent = d.error || 'Error al ocultar'; }
       } else if (b.dataset.act === 'edit') {
         openEdit(id);
       }
@@ -249,7 +258,14 @@
       else { const d = await r.json().catch(() => ({})); const m = $('#editMsg'); m.className = 'msg msg--err'; m.textContent = d.error || 'Error'; }
     });
 
-    (async () => { if (!(await guard())) return; await loadGhl(); await loadUsers(); })();
+    (async () => {
+      if (!(await guard())) return;
+      if (myRole === 'super_admin') {
+        const w = $('#verOcultosWrap'); if (w) w.hidden = false;
+        const c = $('#verOcultos'); if (c) c.addEventListener('change', loadUsers);
+      }
+      await loadGhl(); await loadUsers();
+    })();
   </script>
 </body>
 </html>

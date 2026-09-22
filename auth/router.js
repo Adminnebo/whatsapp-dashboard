@@ -7,7 +7,7 @@
 'use strict';
 const express = require('express');
 const { URL, ANON, admin, getProfile } = require('./supabase');
-const { requireAuth, requireAdmin, plataformasDe, permisosDe, PLATAFORMAS } = require('./middleware');
+const { requireAuth, requireAdmin, requireSuperAdmin, plataformasDe, permisosDe, PLATAFORMAS } = require('./middleware');
 const { limpiar: limpiarPermisos } = require('./permcatalog');
 
 const router = express.Router();
@@ -55,7 +55,9 @@ router.get('/me', requireAuth, async (req, res) => {
 });
 
 // ---- Administración de usuarios (solo admin) ----
-router.get('/users', requireAuth, requireAdmin, async (_req, res) => {
+router.get('/users', requireAuth, requireAdmin, async (req, res) => {
+  const esSuper = !!(req.profile && req.profile.role === 'super_admin');
+  const verOcultos = esSuper && ['1', 'true'].includes(String(req.query.includeHidden || ''));
   const { data: list, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 500 });
   if (error) return res.status(500).json({ error: error.message });
   const { data: profs } = await admin.from('profiles').select('*');
@@ -67,10 +69,11 @@ router.get('/users', requireAuth, requireAdmin, async (_req, res) => {
       role: p.role || 'agent', fullName: p.full_name || null, ghlUserId: p.ghl_user_id || null,
       // plataformas y permisos concedidos; admin/super_admin siempre todo
       platforms: plataformasDe(p),
-      permissions: permisosDe(p)
+      permissions: permisosDe(p),
+      hidden: !!p.hidden
     };
-  });
-  res.json({ users });
+  }).filter(u => verOcultos || !u.hidden);   // los ocultos solo los ve el super_admin con ?includeHidden=1
+  res.json({ users, canHide: esSuper, includeHidden: verOcultos });
 });
 
 router.post('/users', requireAuth, requireAdmin, async (req, res) => {
@@ -142,6 +145,22 @@ router.delete('/users/:id', requireAuth, requireAdmin, async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
   await admin.from('profiles').delete().eq('id', req.params.id);
   res.json({ ok: true });
+});
+
+// Ocultar / mostrar un usuario del listado. SOLO super_admin. No borra nada: marca
+// profiles.hidden (requiere la columna, ver migracion-profiles-hidden.sql). Un
+// super_admin no se puede ocultar (queda protegido).
+router.patch('/users/:id/hidden', requireAuth, requireSuperAdmin, async (req, res) => {
+  if (await protegidoSuper(req.params.id, res)) return;
+  const id = req.params.id;
+  const hidden = !!(req.body && req.body.hidden);
+  const { data, error } = await admin.from('profiles').update({ hidden }).eq('id', id).select('id');
+  if (error) return res.status(400).json({ error: 'No se pudo actualizar (¿falta la columna profiles.hidden?): ' + error.message });
+  if (!data || !data.length) {                    // usuario sin perfil: crear uno mínimo para poder ocultarlo
+    const { error: e2 } = await admin.from('profiles').upsert({ id, hidden });
+    if (e2) return res.status(400).json({ error: e2.message });
+  }
+  res.json({ ok: true, hidden });
 });
 
 module.exports = router;
