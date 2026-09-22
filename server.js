@@ -51,6 +51,19 @@ function isProtected(...vals) {
   return false;
 }
 
+// ── Contactos visibles SOLO para el super_admin ───────────────────────────────
+// Estos números no aparecen en el panel de conversaciones (ni sus mensajes) para
+// nadie que no sea super_admin. Configurable por env (CSV de teléfonos/ids).
+const SUPERADMIN_ONLY = new Set(
+  String(process.env.SUPERADMIN_ONLY_CONTACTS || '573232234915,573505903076,584148681867,18099612875,18502420873')
+    .split(',').map(s => s.replace(/\D/g, '')).filter(Boolean)
+);
+// ¿Alguno de estos identificadores (phone / user_id / ghl_contact_id) es reservado?
+const esNumeroReservado = (...vals) => vals.some(v => {
+  const d = String(v == null ? '' : v).replace(/\D/g, '');
+  return d && SUPERADMIN_ONLY.has(d);
+});
+
 // ── Cobrado por modelo ───────────────────────────────────────────────────────
 // El cobrado ya no es fijo: sale del % configurado por modelo en Ajustes
 // (tabla pct_models, en esta misma base). charged = coste_ia × (1 + %/100).
@@ -821,7 +834,12 @@ app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res)
       FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
       ${filtro}
       ORDER BY conv.last_message_at DESC NULLS LAST`, params);
-  const conversations = r.rows.map(row => {
+  // Números reservados: solo el super_admin los ve en el panel.
+  const prof = req.user ? await getProfile(req.user.id).catch(() => null) : null;
+  const esSuper = !authConfigured || (prof && prof.role === 'super_admin');
+  const conversations = r.rows
+    .filter(row => esSuper || !esNumeroReservado(row.phone, row.user_id, row.ghl_contact_id))
+    .map(row => {
     // Fallback de display: nombre → teléfono → user_id de Meta → id externo → '?'.
     // Así un contacto por username (sin teléfono/nombre) muestra su id, no "?".
     const nm = row.name || row.phone || row.user_id || row.ghl_contact_id || '?';
@@ -842,6 +860,17 @@ app.get('/api/conversations', need('inbox.conversations'), wrap(async (req, res)
 app.get('/api/messages', need('inbox.conversations'), wrap(async (req, res) => {
   const id = String(req.query.conversationId || '');
   if (!id) return res.json({ messages: [], hasMore: false });
+  // Números reservados: solo el super_admin puede abrir sus mensajes (aunque tenga el id).
+  if (authConfigured) {
+    const prof = req.user ? await getProfile(req.user.id).catch(() => null) : null;
+    if (!(prof && prof.role === 'super_admin')) {
+      const cc = await q(`SELECT c.phone, c.user_id, c.ghl_contact_id
+                          FROM conversations conv JOIN contacts c ON c.id = conv.contact_id
+                          WHERE conv.id = $1::bigint`, [id.replace(/[^0-9]/g, '') || '0']);
+      const cr = cc.rows[0];
+      if (cr && esNumeroReservado(cr.phone, cr.user_id, cr.ghl_contact_id)) return res.status(403).json({ error: 'No autorizado' });
+    }
+  }
   // Paginación SOLO si el cliente pide `limit` (inbox web): trae los últimos `limit`
   // y, con `before`, los anteriores. Si NO viene `limit` (p.ej. el APK móvil actual),
   // devuelve TODO el historial — así no se rompe el móvil sin recompilar.
