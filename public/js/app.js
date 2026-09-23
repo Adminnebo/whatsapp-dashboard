@@ -904,15 +904,8 @@
           const tienePlat = k => !Array.isArray(plats) || !plats.length || plats.includes(k);
           const gc = document.querySelector('#goCotiz'); if (gc && tienePlat('cotizaciones')) gc.hidden = false;
           const gb = document.querySelector('#goCobranzas'); if (gb && tienePlat('cobranzas')) gb.hidden = false;
-          // Marketing decide su propio acceso (solo super_admin o a quien ellos se lo den):
-          // se le pregunta con este mismo token y el acceso sale solo si responde que sí.
-          const gm = document.querySelector('#goMarketing');
-          if (gm && Auth.currentToken) {
-            fetch(gm.href.replace(/\/+$/, '') + '/api/acceso', { headers: { Authorization: 'Bearer ' + Auth.currentToken } })
-              .then(r => (r.ok ? r.json() : null))
-              .then(j => { if (j && j.acceso) gm.hidden = false; })
-              .catch(() => {});
-          }
+          // Marketing se ve siempre: quien no tenga acceso ve alla un aviso claro (pedido 2026-09-23).
+          const gm = document.querySelector('#goMarketing'); if (gm) gm.hidden = false;
           const esAdmin = ['admin', 'super_admin'].includes(role);
           if (esAdmin) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
           // El toggle global del bot SOLO lo cambia admin/super_admin. Los demás lo
