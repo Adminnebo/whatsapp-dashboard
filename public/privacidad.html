@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Política de privacidad de Nebo AI · Paneles: qué datos se tratan, con qué proveedores y por cuánto tiempo.">
+<title>Política de Privacidad · Nebo AI · Paneles</title>
+
+<style>
+  :root {
+    --papel:  #FBFBFC;
+    --panel:  #F2F3F6;
+    --tinta:  #1A1D24;
+    --suave:  #5B6272;
+    --linea:  #E2E4EA;
+    --acento: #34496E;
+    --marca:  #8C4B3C;
+
+    --titulo: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --texto:  "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --dato:   ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --papel:  #14161B;
+      --panel:  #1B1E25;
+      --tinta:  #E7E8EC;
+      --suave:  #9AA1B0;
+      --linea:  #2A2E38;
+      --acento: #97AEDA;
+      --marca:  #D89179;
+    }
+  }
+  :root[data-theme="dark"] {
+    --papel:  #14161B;
+    --panel:  #1B1E25;
+    --tinta:  #E7E8EC;
+    --suave:  #9AA1B0;
+    --linea:  #2A2E38;
+    --acento: #97AEDA;
+    --marca:  #D89179;
+  }
+
+  body {
+    background: var(--papel);
+    color: var(--tinta);
+    font-family: var(--texto);
+    font-size: 17px;
+    line-height: 1.68;
+    margin: 0;
+    padding: 0 24px 110px;
+  }
+  .hoja { max-width: 700px; margin: 0 auto; }
+
+  header.tapa {
+    padding: 76px 0 28px;
+    border-bottom: 2px solid var(--tinta);
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .empresa {
+    font-family: var(--titulo); font-size: 12px; font-weight: 700;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--acento);
+  }
+  h1 {
+    font-family: var(--titulo);
+    font-size: clamp(30px, 5.4vw, 41px); font-weight: 700;
+    line-height: 1.12; margin: 0; letter-spacing: -.015em; text-wrap: balance;
+  }
+  .fechas {
+    font-family: var(--dato); font-size: 12.5px; color: var(--suave);
+    display: flex; flex-wrap: wrap; gap: 4px 20px;
+  }
+
+  .resumen {
+    margin: 30px 0 8px; padding: 20px 24px;
+    background: var(--panel); border-radius: 5px;
+    border-left: 3px solid var(--acento);
+  }
+  .resumen p { margin: 0 0 10px; }
+  .resumen p:last-child { margin-bottom: 0; }
+
+  section.clausula {
+    padding-top: 40px; margin-top: 40px; border-top: 1px solid var(--linea);
+  }
+  h2 {
+    font-family: var(--titulo); font-size: 21px; font-weight: 700;
+    margin: 0 0 16px; line-height: 1.3; text-wrap: balance;
+    display: flex; gap: 13px; align-items: baseline;
+  }
+  h2 .num {
+    font-family: var(--dato); font-size: 13px; color: var(--acento);
+    flex: none; font-variant-numeric: tabular-nums;
+  }
+  h3 {
+    font-family: var(--titulo); font-size: 15px; font-weight: 700;
+    margin: 26px 0 10px; color: var(--acento);
+  }
+  p { margin: 0 0 14px; }
+  section.clausula > p:last-child, li > p:last-child { margin-bottom: 0; }
+
+  ul, ol.letras { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 8px; }
+  ol.letras { list-style: lower-latin; }
+
+  .tabla-scroll { overflow-x: auto; margin: 0 0 16px; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--titulo); font-size: 14px; }
+  th, td {
+    text-align: left; padding: 10px 14px 10px 0;
+    border-bottom: 1px solid var(--linea); vertical-align: top;
+  }
+  th {
+    font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--suave); font-weight: 700; border-bottom-color: var(--tinta);
+  }
+  td strong { font-weight: 700; }
+
+  .destacado {
+    margin: 18px 0; padding: 16px 20px;
+    background: var(--panel); border-left: 3px solid var(--marca); border-radius: 0 5px 5px 0;
+  }
+  .destacado p:last-child { margin-bottom: 0; }
+  .destacado b { color: var(--marca); }
+
+  code {
+    font-family: var(--dato); font-size: .85em;
+    background: var(--panel); padding: 2px 5px; border-radius: 3px; overflow-wrap: anywhere;
+  }
+  a { color: var(--acento); }
+  :focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+  footer {
+    margin-top: 52px; padding-top: 22px; border-top: 2px solid var(--tinta);
+    font-family: var(--titulo); font-size: 14px; color: var(--suave);
+  }
+</style>
+
+</head>
+<body>
+<div class="hoja">
+
+<header class="tapa">
+  <div class="empresa">Nebo AI · Paneles</div>
+  <h1>Política de Privacidad</h1>
+  <div class="fechas">
+    <span>Vigente desde: 1 de octubre de 2026</span>
+    <span>Versión 1.0</span>
+  </div>
+</header>
+
+<div class="resumen">
+  <p><b>En resumen.</b> Estos paneles son la herramienta con la que una empresa atiende a sus clientes por mensajería, emite cotizaciones y gestiona su cobranza. Los datos de esos clientes pertenecen a la empresa que usa el panel; Nebo AI los procesa siguiendo sus instrucciones.</p>
+  <p>No vendemos datos, no los usamos para publicidad y no entrenamos modelos de inteligencia artificial con ellos.</p>
+</div>
+
+<section class="clausula">
+  <h2><span class="num">1</span> Quiénes somos y a qué aplica esta política</h2>
+<p>Nebo AI es un nombre comercial registrado en el Estado de Florida por LM Consulting Group USA LLC, con domicilio en 3905 NW 107th Ave, Suite 304, Doral, FL 33178, Estados Unidos. LM Consulting Group USA LLC (en adelante, «Nebo AI», «nosotros») es la responsable de este sitio.</p>
+<p>Esta política aplica a los paneles de Conversaciones (<code>whatsapp.neboaiconsulting.com</code>), Cotizaciones (<code>panelcotizaciones.neboaiconsulting.com</code>) y Cobranzas (<code>panelcobranzas.neboaiconsulting.com</code>), y a la aplicación móvil y web <code>app.neboaiconsulting.com</code>, que comparten un mismo acceso. Contacto: <strong>privacidad@neboaiconsulting.com</strong>.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">2</span> Nuestro rol</h2>
+<div class="tabla-scroll"><table><thead><tr><th>Datos</th><th>Quién decide sobre ellos</th><th>Nuestro rol</th></tr></thead><tbody>
+<tr><td><strong>Contactos, conversaciones, cotizaciones y cartera de la empresa</strong></td><td>La empresa que usa el panel: es la responsable del tratamiento</td><td>Encargado: actuamos bajo sus instrucciones</td></tr>
+<tr><td><strong>Cuentas de acceso del personal</strong></td><td>Nebo AI</td><td>Responsable del tratamiento</td></tr>
+</tbody></table></div>
+<p>La empresa que usa el panel debe contar con la base legal y las autorizaciones necesarias frente a las personas cuyos datos trata, e informarles de este tratamiento.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">3</span> Qué datos se tratan</h2>
+<h3>Del personal que usa el panel</h3>
+<ul>
+<li>Correo, nombre, rol y permisos; fecha de alta y de último acceso.</li>
+<li>Registro de las acciones realizadas en el panel y de los mensajes enviados.</li>
+<li>Tickets de soporte, con sus comentarios y archivos adjuntos.</li>
+<li>Historial de consultas al asistente de cartera.</li>
+</ul>
+<h3>De las personas que se comunican con la empresa</h3>
+<ul>
+<li><strong>Identificación y contacto:</strong> nombre o razón social, teléfono, correo, empresa, RNC, dirección, e identificador de Instagram o Facebook.</li>
+<li><strong>Conversaciones:</strong> mensajes de WhatsApp, Instagram, Messenger y chat web, junto con las notas de voz, imágenes y documentos intercambiados.</li>
+<li><strong>Cotizaciones:</strong> destinatario, productos, cantidades, importes y el documento PDF.</li>
+<li><strong>Cobranza:</strong> saldo, saldo vencido, límite de crédito, días de atraso, último pago y promesas de pago.</li>
+<li><strong>Llamadas:</strong> fecha, duración, resultado, transcripción y grabación de las llamadas del agente de voz.</li>
+</ul>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">4</span> Para qué se usan</h2>
+<p>Para atender las conversaciones, emitir cotizaciones, gestionar la cobranza, medir el funcionamiento del servicio y dar soporte.</p>
+<div class="destacado"><p><b>Lo que no hacemos.</b> No vendemos datos personales, no los usamos para publicidad y no entrenamos modelos de inteligencia artificial con ellos.</p></div>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">5</span> Proveedores que intervienen</h2>
+<div class="tabla-scroll"><table><thead><tr><th>Proveedor</th><th>Para qué</th><th>Qué recibe</th></tr></thead><tbody>
+<tr><td><strong>Supabase</strong></td><td>Cuentas de acceso, base de datos de cobranza y almacenamiento de cotizaciones</td><td>Datos de las cuentas, cartera, promesas de pago y documentos PDF</td></tr>
+<tr><td><strong>Railway</strong></td><td>Alojamiento de los paneles y base de datos de conversaciones</td><td>Toda la información de los paneles</td></tr>
+<tr><td><strong>Meta Platforms</strong></td><td>Canales de WhatsApp, Instagram y Messenger</td><td>Los mensajes y archivos que circulan por esos canales</td></tr>
+<tr><td><strong>GoHighLevel / LeadConnector</strong></td><td>CRM de la empresa</td><td>Datos de contacto, etiquetas y estado del asistente</td></tr>
+<tr><td><strong>OpenAI</strong></td><td>Análisis de cartera y asistente de cobranza</td><td>Datos de cartera y de llamadas: nombre, teléfono, correo, saldos, notas y transcripciones</td></tr>
+<tr><td><strong>VAPI y Sword AI</strong></td><td>Agente de voz, grabaciones y pagos del servicio</td><td>Teléfono, nombre y saldos de la persona llamada; audio de la llamada</td></tr>
+<tr><td><strong>n8n</strong></td><td>Automatización de flujos, operada por Nebo AI</td><td>Mensajes, datos de llamadas y tickets de soporte</td></tr>
+<tr><td><strong>SmarterASP.NET</strong></td><td>Alojamiento de la base de datos de cotizaciones de la empresa</td><td>Las cotizaciones, que el panel solo lee</td></tr>
+<tr><td><strong>Google Fonts y jsDelivr</strong></td><td>Tipografías y librerías de la página</td><td>Tu dirección IP y el tipo de navegador</td></tr>
+</tbody></table></div>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">6</span> Cookies y almacenamiento en tu navegador</h2>
+<p>Los paneles no usan cookies ni herramientas de analítica o publicidad. Guardan en el almacenamiento local de tu navegador la sesión iniciada y tus preferencias (tema, vista, ajustes).</p>
+<p>El micrófono solo se usa cuando grabas una nota de voz, y las notificaciones solo si las autorizas.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">7</span> Por cuánto tiempo se conservan</h2>
+<p>Los datos se conservan mientras dure el servicio contratado por la empresa. No aplicamos un borrado automático por antigüedad: las conversaciones, contactos y demás registros se eliminan cuando la empresa lo hace desde el panel, o cuando ella o la persona titular lo solicitan.</p>
+<p>Al terminar el servicio, eliminamos los datos de la empresa a su solicitud, salvo lo que debamos conservar por obligación legal.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">8</span> Dónde se procesan los datos</h2>
+<p>Nebo AI opera desde Estados Unidos y sus proveedores procesan datos en Estados Unidos y en otros países. Si usas el servicio desde la República Dominicana u otro país, tus datos se transfieren fuera de él. Solo reciben datos los proveedores indicados en esta política, y únicamente lo necesario para su función.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">9</span> Seguridad</h2>
+<p>Aplicamos medidas proporcionales al riesgo:</p>
+<ul>
+<li>las comunicaciones viajan cifradas mediante TLS;</li>
+<li>las contraseñas no se guardan en claro;</li>
+<li>el acceso requiere una cuenta personal, creada por un administrador, con permisos por rol;</li>
+<li>los archivos adjuntos se sirven mediante enlaces firmados;</li>
+<li>se registran las acciones relevantes que el personal realiza en el panel.</li>
+</ul>
+<p>Ningún sistema es invulnerable. Si un incidente afecta tus datos personales, te lo notificaremos sin demora indebida y dentro de los plazos legales aplicables.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">10</span> Tus derechos</h2>
+<p>Puedes pedir acceso, corrección o eliminación de tus datos, u oponerte a su uso, escribiendo a <strong>privacidad@neboaiconsulting.com</strong>. Atendemos estas solicitudes sin importar tu país de residencia. Si resides en la República Dominicana, te asisten además los derechos de la Ley 172-13 sobre Protección de Datos de Carácter Personal.</p>
+<p>Si tus datos se tratan porque te comunicaste con una empresa que usa estos paneles, dirige tu solicitud a esa empresa: es ella quien decide sobre tus datos. Si recibimos tu solicitud directamente, se la trasladamos y le prestamos la asistencia técnica necesaria para atenderla.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">11</span> Menores de edad</h2>
+<p>El servicio está dirigido a empresas y a su personal. No está diseñado para menores de edad.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">12</span> Cambios en esta política</h2>
+<p>Podemos actualizar esta política. Publicaremos aquí la versión vigente con su fecha, y avisaremos de los cambios sustanciales dentro del propio servicio.</p>
+</section>
+
+<section class="clausula">
+  <h2><span class="num">13</span> Ley aplicable</h2>
+<p>Esta política se rige por las leyes del Estado de Florida y las leyes federales de Estados Unidos. Cuando la persona titular o la empresa cliente estén sujetas a otra normativa de protección de datos, como la Ley 172-13 de la República Dominicana, se respetarán también los derechos que esa normativa les reconoce.</p>
+</section>
+
+<footer>Nebo AI · Paneles · LM Consulting Group USA LLC · <a href="/">Volver</a></footer>
+
+</div>
+</body>
+</html>

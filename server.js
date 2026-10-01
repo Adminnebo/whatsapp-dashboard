@@ -2383,6 +2383,8 @@ app.get('/api/ghl-users', requireAdmin, wrap(async (_req, res) => {
 }));
 
 app.use(express.static(path.join(__dirname, 'public')));
+// Política de privacidad: pública, antes del fallback del SPA.
+app.get('/privacidad', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'privacidad.html')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
 // ---- arranque ----

@@ -21,6 +21,8 @@
     button:hover { background: #2f68cc; }
     button:disabled { opacity: .6; cursor: default; }
     .err { margin-top: 14px; font-size: 13px; color: #f87171; min-height: 18px; text-align: center; }
+    .legal { margin-top: 10px; font-size: 12.5px; text-align: center; }
+    .legal a { color: #8b8f9a; }
   </style>
 </head>
 <body>
@@ -38,6 +40,7 @@
     <input type="password" id="password" autocomplete="current-password" required />
     <button type="submit" id="btn">Entrar</button>
     <div class="err" id="err"></div>
+    <p class="legal"><a href="/privacidad">Política de privacidad</a></p>
   </form>
 
   <script src="js/auth.js"></script>
