@@ -239,7 +239,9 @@
       // cabecera
       $('#threadAvatar').textContent = conv.avatar.initials;
       $('#threadAvatar').style.background = conv.avatar.color;
-      $('#threadName').textContent = conv.name;
+      // Si se está renombrando ESTE contacto, no se pisa el campo (los refrescos lo borrarían).
+      const editando = $('#threadName').querySelector('input');
+      if (!editando || editando.dataset.conv !== conv.id) $('#threadName').textContent = conv.name;
       $('#threadPhone').textContent = conv.phone || conv.userId || (conv.contactId ? 'ID ' + conv.contactId : '');
       const hcm = chMeta(conv.channel);
       const chanEl = $('#threadChan');
@@ -585,6 +587,41 @@
       const first = t.body.vars && t.body.vars[0];
       const inp = first && document.getElementById('tplB' + first);
       if (inp && conv && conv.name) { inp.value = String(conv.name).split(' ')[0]; repinta(); }
+    },
+
+    // Renombrar el contacto (solo super_admin): el nombre de la cabecera se vuelve
+    // un campo. Enter o salir del campo guarda; Esc cancela.
+    startRename() {
+      const conv = Store.activeConversation();
+      const el = $('#threadName');
+      if (!conv || el.querySelector('input')) return;
+      const input = document.createElement('input');
+      input.className = 'thread__nameinput';
+      input.value = conv.name; input.maxLength = 80; input.dataset.conv = conv.id;
+      input.setAttribute('aria-label', 'Nombre del contacto');
+      el.textContent = ''; el.append(input); input.focus(); input.select();
+      let cerrado = false;
+      const cerrar = async guardar => {
+        if (cerrado) return; cerrado = true;
+        const nuevo = input.value.replace(/\s+/g, ' ').trim();
+        if (guardar && nuevo && nuevo !== conv.name) {
+          try {
+            const d = await Api.renameContact(conv.id, nuevo);
+            conv.name = d.name;
+            if (d.avatar) conv.avatar = d.avatar;
+            UI.toast('Nombre actualizado');
+          } catch (e) { UI.toast('No se pudo cambiar el nombre: ' + ((e && e.message) || 'error')); }
+        }
+        if (input.isConnected) el.textContent = conv.name;
+        if (Store.activeId === conv.id) { $('#threadAvatar').textContent = conv.avatar.initials; $('#threadAvatar').style.background = conv.avatar.color; }
+        UI.renderList();
+      };
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); cerrar(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); cerrar(false); }
+      });
+      // Si el campo desapareció (se abrió otra conversación), no se guarda a medias.
+      input.addEventListener('blur', () => cerrar(input.isConnected));
     },
 
     toast(msg) {

@@ -1101,6 +1101,25 @@ app.post('/api/message-cost', wrap(async (req, res) => {
   res.json({ ok: true, updated: r.rowCount });
 }));
 
+// Cambia a mano el nombre de un contacto. SOLO super_admin. El nombre manual no
+// lo pisa ningún mensaje posterior: al guardar, el nombre solo se rellena si está
+// vacío (COALESCE). Queda en el registro de acciones con el nombre anterior.
+app.post('/api/contact-name', needSuper, wrap(async (req, res) => {
+  const b = req.body || {};
+  const convId = String(b.conversationId || b.conversation_id || '').replace(/[^0-9]/g, '');
+  const name = String(b.name == null ? '' : b.name).replace(/\s+/g, ' ').trim();
+  if (!convId) return res.status(400).json({ error: 'Falta conversationId' });
+  if (!name) return res.status(400).json({ error: 'El nombre no puede quedar vacío' });
+  if (name.length > 80) return res.status(400).json({ error: 'El nombre es demasiado largo (máximo 80 caracteres)' });
+  const antes = await q(`SELECT c.id, c.ghl_contact_id, c.name FROM conversations cv JOIN contacts c ON c.id = cv.contact_id
+                         WHERE cv.id = $1::bigint LIMIT 1`, [convId]);
+  const c = antes.rows[0];
+  if (!c) return res.status(404).json({ error: 'Conversación no encontrada' });
+  await q(`UPDATE contacts SET name = $2, updated_at = now() WHERE id = $1`, [c.id, name]);
+  await logAction(req, 'contact_rename', c.ghl_contact_id || String(c.id), 'Nombre: ' + (c.name || '(sin nombre)') + ' → ' + name);
+  res.json({ ok: true, name, avatar: { initials: initials(name), color: colorFor(name) } });
+}));
+
 app.post('/api/delete-conversation', need('inbox.delete'), wrap(async (req, res) => {
   const id = String((req.body && req.body.conversationId) || '').replace(/[^0-9]/g, '');
   const cr = await q(`SELECT c.ghl_contact_id, c.phone, c.user_id FROM conversations cv JOIN contacts c ON c.id=cv.contact_id WHERE cv.id=(NULLIF($1,''))::bigint`, [id]);
