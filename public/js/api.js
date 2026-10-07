@@ -140,6 +140,10 @@
         (target && typeof target === 'object') ? target : { conversationId: target });
       return await http(url, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
     },
+    // Cambia el nombre del contacto de una conversación (solo super_admin).
+    async renameContact(conversationId, name) {
+      return await http('/api/contact-name', { method: 'POST', headers: headers(), body: JSON.stringify({ conversationId, name }) });
+    },
     // Lista de contactos bloqueados (incluye los que no tienen conversación).
     async listBlocked() {
       return await http('/api/blocked', { method: 'GET', headers: headers() });

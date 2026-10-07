@@ -868,6 +868,11 @@
         try {
           const me = await Auth.me();
           const role = me && me.profile ? me.profile.role : null;
+          // Renombrar contactos: solo el super_admin ve el lápiz junto al nombre.
+          if (role === 'super_admin') {
+            const br = document.querySelector('#btnRename');
+            if (br) { br.hidden = false; br.addEventListener('click', () => UI.startRename()); }
+          }
           // Puerta de acceso: si el usuario no tiene la plataforma 'inbox', no entra.
           const plats = (me && me.platforms) || [];
           if (Array.isArray(plats) && plats.length && !plats.includes('inbox')) {
