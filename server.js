@@ -2516,8 +2516,16 @@ async function scanHandoff() {
     // borra la etiqueta en GHL.
   } catch (e) { console.error('scanHandoff', e.message); }
 }
-setInterval(scanHandoff, 60 * 1000);       // cada minuto
-setTimeout(scanHandoff, 5 * 1000);         // primera pasada al arrancar
+// Cada 30 s. Una pasada hace una llamada a GHL por contacto etiquetado, así que puede
+// tardar: si la anterior no terminó, esta se salta en vez de encimarse.
+let _scanHandoffBusy = false;
+async function scanHandoffTick() {
+  if (_scanHandoffBusy) return;
+  _scanHandoffBusy = true;
+  try { await scanHandoff(); } finally { _scanHandoffBusy = false; }
+}
+setInterval(scanHandoffTick, 30 * 1000);   // cada 30 segundos
+setTimeout(scanHandoffTick, 5 * 1000);     // primera pasada al arrancar
 
 // ── Auto-return: chats que llevan X minutos en handoff → reactivar Camila ─────
 // El tiempo se configura desde la interfaz (Ajustes). 0 = desactivado.
