@@ -134,6 +134,13 @@
     // Bloquear/desbloquear un contacto. `target` puede ser un conversationId (valor)
     // o un objeto { conversationId | phone | userId }. Bloquear un `phone` que no
     // existe crea el contacto (bloqueo proactivo).
+    // Renombra el contacto de una conversación (solo super_admin; el backend lo exige).
+    async setContactName(conversationId, name) {
+      return await http('/api/contact-name', {
+        method: 'POST', headers: headers(), body: JSON.stringify({ conversationId, name })
+      });
+    },
+
     async blockSet(target, blocked) {
       const url = S().blockSetUrl || '/api/block-set';
       const body = Object.assign({ blocked: !!blocked },

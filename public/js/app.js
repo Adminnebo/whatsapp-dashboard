@@ -301,6 +301,22 @@
       } catch (e) { UI.toast('No se pudo desbloquear: ' + e.message); }
     },
 
+    // ---------- renombrar contacto (solo super_admin) ----------
+    async renameContact() {
+      const c = Store.activeConversation(); if (!c) return;
+      const nuevo = prompt('Nombre del contacto', c.name || '');
+      if (nuevo == null) return;                              // canceló
+      const name = nuevo.replace(/\s+/g, ' ').trim();
+      if (!name || name === c.name) return;
+      try {
+        const d = await Api.setContactName(c.id, name);
+        c.name = (d && d.name) || name;
+        c.avatar = { initials: (c.name.split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase()) || '?', color: c.avatar.color };
+        UI.renderList(); UI.renderThread();
+        UI.toast('Nombre actualizado');
+      } catch (e) { UI.toast('No se pudo cambiar el nombre: ' + e.message); }
+    },
+
     // ---------- bloquear / desbloquear contacto ----------
     // Bloqueado = Camila nunca le responde (todos los canales). El servidor espeja
     // el estado a Supabase (WhatsApp) y GHL (IG/FB/web).
@@ -715,6 +731,8 @@
       $('#btnMic').addEventListener('click', () => this.startRecording());
       $('#recCancel').addEventListener('click', () => this.stopRecording(false));
       $('#recSend').addEventListener('click', () => this.stopRecording(true));
+      // renombrar contacto (el botón solo se muestra al super_admin)
+      $('#btnRename').addEventListener('click', () => this.renameContact());
       // destacar
       $('#btnStar').addEventListener('click', () => {
         const c = Store.activeConversation(); if (!c) return;
@@ -908,6 +926,8 @@
           const gm = document.querySelector('#goMarketing'); if (gm) gm.hidden = false;
           const esAdmin = ['admin', 'super_admin'].includes(role);
           if (esAdmin) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
+          // Renombrar contactos: solo super_admin (el backend también lo exige).
+          if (role === 'super_admin') { const rb = document.querySelector('#btnRename'); if (rb) rb.hidden = false; }
           // El toggle global del bot SOLO lo cambia admin/super_admin. Los demás lo
           // ven (para saber el estado) pero no pueden tocarlo.
           App._botEditable = esAdmin;

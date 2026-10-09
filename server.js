@@ -1460,6 +1460,29 @@ app.post('/api/handoff-set', wrap(async (req, res) => {
   });
 }));
 
+// Renombrar un contacto desde el panel. SOLO super_admin. Cambia el nombre en NUESTRA
+// base (no en GHL): es el que pinta la lista, y ni los entrantes ni el alta de contacto
+// lo pisan después, porque solo rellenan el nombre cuando falta.
+app.post('/api/contact-name', needSuper, wrap(async (req, res) => {
+  const b = req.body || {};
+  const convId = String(b.conversationId || b.conversation_id || '').replace(/[^0-9]/g, '');
+  const name = String(b.name == null ? '' : b.name).replace(/\s+/g, ' ').trim();
+  if (!convId) return res.status(400).json({ error: 'Falta conversationId' });
+  if (!name) return res.status(400).json({ error: 'El nombre no puede estar vacío' });
+  if (name.length > 120) return res.status(400).json({ error: 'El nombre es demasiado largo (máx. 120)' });
+
+  const r = await q(
+    `UPDATE contacts c SET name = $2, updated_at = now()
+     FROM (SELECT id, name FROM contacts WHERE id = (SELECT contact_id FROM conversations WHERE id = $1::bigint)) old
+     WHERE c.id = old.id
+     RETURNING c.id, c.ghl_contact_id, c.name, old.name AS anterior`, [convId, name]);
+  const c = r.rows[0];
+  if (!c) return res.status(404).json({ error: 'Contacto no encontrado' });
+  await logAction(req, 'contact_rename', c.ghl_contact_id || String(c.id),
+    `Renombró el contacto: "${c.anterior || ''}" → "${c.name}"`);
+  res.json({ ok: true, name: c.name });
+}));
+
 // Bloquear/desbloquear un contacto: el bot NUNCA le responde (todos los canales).
 // Es una lista de bloqueo deliberada, aparte del handoff (humano temporal). El
 // "bot activo" real de un contacto = !handoff && !blocked; ese estado se espeja a

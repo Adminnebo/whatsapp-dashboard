@@ -371,6 +371,11 @@ input, textarea, select { font-family: inherit; font-size: 14px; }
 .thread__head-contact { display: flex; align-items: center; gap: 12px; }
 .thread__head .avatar { width: 42px; height: 42px; font-size: 14px; }
 .thread__name { font-weight: 600; font-size: 15px; }
+.thread__name-row { display: flex; align-items: center; gap: 4px; }
+.thread__rename { width: 22px; height: 22px; border-radius: 6px; color: var(--text-soft); display: grid; place-items: center; transition: background .12s, color .12s; }
+.thread__rename:hover { background: var(--bg); color: var(--text); }
+.thread__rename svg { width: 14px; height: 14px; fill: currentColor; }
+.thread__rename[hidden] { display: none; }
 .thread__sub { font-size: 12px; color: var(--text-soft); display: flex; align-items: center; gap: 4px; }
 .chan-badge { display: inline-flex; align-items: center; gap: 3px; color: var(--wa); font-weight: 600; }
 .chan-badge svg { width: 12px; height: 12px; fill: currentColor; }
