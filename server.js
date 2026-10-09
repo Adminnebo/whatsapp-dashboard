@@ -176,7 +176,7 @@ app.use('/api/auth', authRouter);
 const OPEN_API = new Set(['/save-in', '/save-out', '/message-cost', '/bot-status', '/health', '/db-setup', '/media', '/tickets/webhook', '/tickets/file', '/tickets/list', '/tickets/comment', '/ghl/contact', '/contact', '/handoff-set']);
 // /tickets es soporte transversal: cualquiera con sesión puede crear uno, aunque
 // no tenga acceso a la plataforma del inbox.
-const SIN_PLATAFORMA = new Set(['/tickets', '/tickets/rate', '/tickets/comment-mine']);
+const SIN_PLATAFORMA = new Set(['/tickets', '/tickets/rate', '/tickets/comment-mine', '/privacy/status', '/privacy/accept']);
 
 // Rate limit por IP SOLO para el panel/usuarios. Los endpoints de máquina
 // (n8n/Meta: save-in/out, ghl/contact, message-cost, webhooks…) van EXENTOS:
@@ -403,6 +403,7 @@ CREATE INDEX IF NOT EXISTS idx_contacts_user_id ON contacts(user_id) WHERE user_
 CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMPTZ DEFAULT now());
 INSERT INTO app_settings (key, value) VALUES ('bot_enabled', 'true') ON CONFLICT (key) DO NOTHING;
 INSERT INTO app_settings (key, value) VALUES ('handoff_auto_return_mins', '0') ON CONFLICT (key) DO NOTHING;
+CREATE TABLE IF NOT EXISTS privacy_acceptances (id BIGSERIAL PRIMARY KEY, user_id TEXT NOT NULL, email TEXT, full_name TEXT, role TEXT, version TEXT NOT NULL, app TEXT, ip TEXT, user_agent TEXT, accepted_at TIMESTAMPTZ DEFAULT now(), UNIQUE (user_id, version));
 CREATE TABLE IF NOT EXISTS action_logs (id BIGSERIAL PRIMARY KEY, action TEXT, actor_name TEXT, actor_email TEXT, contact_id TEXT, detail TEXT, created_at TIMESTAMPTZ DEFAULT now());
 ALTER TABLE action_logs ADD COLUMN IF NOT EXISTS ref_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_action_logs_created ON action_logs(created_at DESC);
@@ -2403,6 +2404,47 @@ app.get('/api/ghl-users', requireAdmin, wrap(async (_req, res) => {
     email: u.email || ''
   }));
   res.json({ users });
+}));
+
+// ── Aceptación de la Política de Privacidad ──────────────────────────────────
+// Los administradores (admin / super_admin) deben leerla y aceptarla: mientras no
+// lo hagan, el pop-up de /privacy-widget.js les bloquea el panel. El registro vive
+// SOLO aquí; los demás paneles cargan ese mismo widget y llaman a estos endpoints
+// con el token Supabase compartido (igual que los tickets). Si la política cambia
+// de forma sustancial, subir PRIVACY_VERSION vuelve a pedir la aceptación.
+const PRIVACY_VERSION = process.env.PRIVACY_VERSION || '1.0';
+const PRIVACY_ROLES = ['admin', 'super_admin'];
+
+app.get('/api/privacy/status', wrap(async (req, res) => {
+  if (!req.user) return res.json({ ok: true, required: false, accepted: true, version: PRIVACY_VERSION });
+  const prof = await getProfile(req.user.id).catch(() => null);
+  const required = !!(prof && PRIVACY_ROLES.includes(prof.role));
+  const r = await q(`SELECT accepted_at FROM privacy_acceptances WHERE user_id = $1 AND version = $2`, [req.user.id, PRIVACY_VERSION]);
+  res.json({ ok: true, required, accepted: !!r.rows[0], acceptedAt: r.rows[0] ? r.rows[0].accepted_at : null, version: PRIVACY_VERSION });
+}));
+
+app.post('/api/privacy/accept', wrap(async (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'No autenticado' });
+  const prof = await getProfile(req.user.id).catch(() => null);
+  const appName = String((req.body && req.body.app) || '').replace(/[^a-z0-9_-]/gi, '').slice(0, 40) || null;
+  await q(
+    `INSERT INTO privacy_acceptances (user_id, email, full_name, role, version, app, ip, user_agent)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (user_id, version) DO NOTHING`,
+    [req.user.id, req.user.email || (prof && prof.email) || null, (prof && prof.full_name) || null, (prof && prof.role) || null,
+     PRIVACY_VERSION, appName, req.ip || null, String(req.get('user-agent') || '').slice(0, 300)]);
+  const r = await q(`SELECT accepted_at FROM privacy_acceptances WHERE user_id = $1 AND version = $2`, [req.user.id, PRIVACY_VERSION]);
+  res.json({ ok: true, accepted: true, acceptedAt: r.rows[0] ? r.rows[0].accepted_at : null, version: PRIVACY_VERSION });
+}));
+
+// Quién aceptó la versión vigente (para la página de Usuarios). Solo administradores.
+app.get('/api/privacy/acceptances', needAdmin, wrap(async (_req, res) => {
+  const r = await q(
+    `SELECT user_id, email, full_name, role, app, accepted_at FROM privacy_acceptances
+     WHERE version = $1 ORDER BY accepted_at DESC`, [PRIVACY_VERSION]);
+  res.json({
+    ok: true, version: PRIVACY_VERSION, roles: PRIVACY_ROLES,
+    acceptances: r.rows.map(x => ({ userId: x.user_id, email: x.email, fullName: x.full_name, role: x.role, app: x.app, acceptedAt: x.accepted_at }))
+  });
 }));
 
 app.use(express.static(path.join(__dirname, 'public')));

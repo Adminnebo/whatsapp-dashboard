@@ -926,6 +926,9 @@
           const gm = document.querySelector('#goMarketing'); if (gm) gm.hidden = false;
           const esAdmin = ['admin', 'super_admin'].includes(role);
           if (esAdmin) { const ub = document.querySelector('#btnUsers'); if (ub) ub.hidden = false; }
+          // Política de privacidad: a los administradores que no la han aceptado les
+          // sale un pop-up bloqueante (el widget decide según el rol y el registro).
+          if (global.PrivacyWidget) PrivacyWidget.init({ getToken: () => Auth.currentToken, app: 'inbox' });
           // Renombrar contactos: solo super_admin (el backend también lo exige).
           if (role === 'super_admin') { const rb = document.querySelector('#btnRename'); if (rb) rb.hidden = false; }
           // El toggle global del bot SOLO lo cambia admin/super_admin. Los demás lo

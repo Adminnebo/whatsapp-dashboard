@@ -30,6 +30,8 @@
     .pill--super_admin { background: rgba(235,104,52,.2); color: #f0996b; }
     .pill--admin { background: rgba(53,116,224,.2); color: #7aa7f5; }
     .pill--agent { background: rgba(255,255,255,.08); color: #b7bcc7; }
+    .pill--ok { background: rgba(26,161,121,.2); color: #4fd1a5; }
+    .pill--pend { background: rgba(245,158,11,.2); color: #f5b942; }
     .msg { font-size: 13px; min-height: 18px; margin-top: 10px; }
     .msg--err { color: #f87171; } .msg--ok { color: #34d399; }
     .row-actions { display: flex; gap: 8px; }
@@ -85,8 +87,8 @@
     <div class="card">
       <h2>Usuarios (<span id="count">…</span>)<label id="verOcultosWrap" hidden style="float:right;font-weight:500;font-size:12px;color:#8b8f9a;cursor:pointer"><input type="checkbox" id="verOcultos" style="width:auto;margin-right:5px;vertical-align:middle"> ver ocultos</label></h2>
       <table>
-        <thead><tr><th>Correo</th><th>Nombre</th><th>Rol</th><th>GHL</th><th>Último acceso</th><th></th></tr></thead>
-        <tbody id="tbody"><tr><td colspan="6" class="dim">Cargando…</td></tr></tbody>
+        <thead><tr><th>Correo</th><th>Nombre</th><th>Rol</th><th>GHL</th><th>Último acceso</th><th>Privacidad</th><th></th></tr></thead>
+        <tbody id="tbody"><tr><td colspan="7" class="dim">Cargando…</td></tr></tbody>
       </table>
       <div class="msg" id="listMsg"></div>
     </div>
@@ -110,6 +112,7 @@
 
   <script src="js/permcatalog.js"></script>
   <script src="js/auth.js"></script>
+  <script src="privacy-widget.js"></script>
   <script>
     let ghlUsers = [], usersList = [], editingId = null, myRole = null;
     const $ = s => document.querySelector(s);
@@ -169,6 +172,26 @@
       return [...$('#' + boxId).querySelectorAll('.plat input:checked')].map(i => i.value);
     }
 
+    // Aceptación de la Política de Privacidad (versión vigente). Solo se les pide a
+    // los administradores; a un agente no le aplica.
+    let privByUser = {}, privRoles = ['admin', 'super_admin'], privVersion = '';
+    async function loadPrivacy() {
+      try {
+        const r = await Auth.fetch('/api/privacy/acceptances');
+        if (!r.ok) return;
+        const d = await r.json();
+        privByUser = {}; (d.acceptances || []).forEach(a => { privByUser[a.userId] = a; });
+        if (Array.isArray(d.roles)) privRoles = d.roles;
+        privVersion = d.version || '';
+      } catch (_) {}
+    }
+    function privCell(u) {
+      const a = privByUser[u.id];
+      if (a) return `<span class="pill pill--ok" title="Versión ${esc(privVersion)}${a.app ? ' · desde ' + esc(a.app) : ''}">Aceptada</span> <span class="dim">${fmt(a.acceptedAt)}</span>`;
+      if (!privRoles.includes(u.role)) return '<span class="dim">No aplica</span>';
+      return '<span class="pill pill--pend">Pendiente</span>';
+    }
+
     async function loadUsers() {
       const canHide = myRole === 'super_admin';
       const inc = (canHide && $('#verOcultos') && $('#verOcultos').checked) ? '?includeHidden=1' : '';
@@ -177,6 +200,7 @@
       $('#listMsg').textContent = '';
       const { users } = await r.json();
       usersList = users;
+      await loadPrivacy();
       $('#count').textContent = users.length;
       const ghlName = id => (ghlUsers.find(u => u.id === id) || {}).name || (id ? id : '—');
       $('#tbody').innerHTML = users.map(u => `<tr data-id="${u.id}" style="${u.hidden ? 'opacity:.5' : ''}">
@@ -185,12 +209,13 @@
         <td><span class="pill pill--${u.role}">${u.role === 'super_admin' ? 'Super admin' : u.role === 'admin' ? 'Admin' : 'Agente'}</span></td>
         <td class="dim">${esc(ghlName(u.ghlUserId))}</td>
         <td class="dim">${fmt(u.lastSignInAt)}</td>
+        <td>${privCell(u)}</td>
         <td class="row-actions">
           ${u.role === 'super_admin'
             ? '<span class="dim">Protegido</span>'
             : `<button class="btn" data-act="edit">Editar</button> ${canHide ? `<button class="btn" data-act="hide">${u.hidden ? 'Mostrar' : 'Ocultar'}</button> ` : ''}<button class="btn btn--danger" data-act="del">Eliminar</button>`}
         </td>
-      </tr>`).join('') || '<tr><td colspan="6" class="dim">Sin usuarios.</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="7" class="dim">Sin usuarios.</td></tr>';
     }
 
     // render inicial de las casillas de "crear" + re-render al cambiar el rol
@@ -265,6 +290,7 @@
         const c = $('#verOcultos'); if (c) c.addEventListener('change', loadUsers);
       }
       await loadGhl(); await loadUsers();
+      if (window.PrivacyWidget) PrivacyWidget.init({ getToken: () => Auth.currentToken, app: 'inbox' });
     })();
   </script>
 </body>
