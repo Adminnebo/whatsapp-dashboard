@@ -2452,12 +2452,26 @@ console.log(`[no-reply] umbral ${NO_REPLY_LABEL} (${NO_REPLY_SECS}s), escaneo ca
 async function scanHandoff() {
   if (!GHL_PIT || !LOCATION_ID) return;
   try {
-    const { json } = await ghl('/contacts/search', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ locationId: LOCATION_ID, pageLimit: 100, filters: [{ field: 'tags', operator: 'contains', value: HANDOFF_TAG }] })
-    });
-    if (!json || !Array.isArray(json.contacts)) return;   // GHL falló: no tocamos el estado
-    const candidatos = json.contacts.map(c => c.id).filter(Boolean);
+    // La búsqueda va paginada (100 por página): si hay más de 100 contactos con la
+    // etiqueta, los nuevos pueden caer en cualquier página y con una sola no se verían.
+    const etiquetados = [];
+    for (let page = 1; page <= 20; page++) {
+      const { status, json } = await ghl('/contacts/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locationId: LOCATION_ID, page, pageLimit: 100, filters: [{ field: 'tags', operator: 'contains', value: HANDOFF_TAG }] })
+      });
+      if (!json || !Array.isArray(json.contacts)) {   // GHL falló: no tocamos el estado
+        console.error('[handoff] la búsqueda en GHL falló: HTTP', status, JSON.stringify(json || '').slice(0, 200));
+        return;
+      }
+      for (const c of json.contacts) if (c.id) etiquetados.push(c.id);
+      if (json.contacts.length < 100) break;
+    }
+    // Solo interesan los que el inbox conoce y aún no tiene marcados: los ya marcados no
+    // cambian, y confirmarlos uno a uno en cada pasada gastaría la cuota diaria de GHL.
+    const pend = await q(
+      `SELECT ghl_contact_id FROM contacts WHERE ghl_contact_id = ANY($1::text[]) AND handoff IS NOT TRUE`, [etiquetados]);
+    const candidatos = pend.rows.map(r => r.ghl_contact_id);
 
     // El índice de búsqueda de GHL va con retraso: sigue devolviendo el contacto un rato
     // después de quitarle la etiqueta. Si nos fiáramos de él, volveríamos a apagar a Camila
