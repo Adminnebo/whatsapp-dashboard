@@ -376,6 +376,8 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS label TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS model TEXT;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12,6);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS charged_usd NUMERIC(12,6);
+-- Coste real del mensaje que calcula y manda n8n (aparte de cost_usd). Solo lo ve el super_admin.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS coste_real NUMERIC(12,6);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS sent_by TEXT;
 -- Ingesta de replies (contrato n8n): hash estable del wamid para resolver citas,
 -- wamid citado y su hash, y la marca de tiempo real del mensaje. Todo NULLABLE:
@@ -582,6 +584,10 @@ function normalize(body, file, direction) {
   let costUsd = body.costUsd ?? body.cost_usd ?? body.costUSD;
   costUsd = (costUsd === '' || costUsd == null) ? null : Number(costUsd);
   if (!Number.isFinite(costUsd)) costUsd = null;
+  // Coste real del mensaje (lo manda n8n como coste_real), aparte del coste de IA.
+  let costeReal = body.coste_real ?? body.costeReal;
+  costeReal = (costeReal === '' || costeReal == null) ? null : Number(costeReal);
+  if (!Number.isFinite(costeReal)) costeReal = null;
   // Id del mensaje: los workflows nuevos mandan `messageId`; se mantiene `wamid` como
   // alias para no romper nada de lo viejo (ni el send/plantillas que ya lo usan).
   // Limpiamos un '=' inicial: n8n a veces lo cuela (prefijo de expresión) y si no,
@@ -621,7 +627,7 @@ function normalize(body, file, direction) {
     userId,
     name: body.name || null, text, wamid, ts, type,
     direction, status: body.status || (direction === 'in' ? 'received' : 'sent'),
-    phone, channel: ch, mediaUrl, mediaMime, mediaName, preview, mediaData, executionMs: execMs, label, model, costUsd,
+    phone, channel: ch, mediaUrl, mediaMime, mediaName, preview, mediaData, executionMs: execMs, label, model, costUsd, costeReal,
     chargedUsd: direction === 'out' ? CLIENT_CHARGE_OUT : null,
     // Quién envió el saliente: nombre del agente logueado o el que mande quien llama (p.ej. "Camila" desde n8n).
     sentBy: body.sentBy != null && String(body.sentBy).trim() !== '' ? String(body.sentBy).trim() : null,
@@ -674,6 +680,8 @@ async function saveMessage(n) {
   const params = [n.contactId, n.name, n.text, n.wamid, n.ts, n.type, n.direction, n.status, n.phone, n.channel, n.mediaUrl, n.mediaMime, n.mediaName, n.preview, n.mediaData || null, n.executionMs ?? null, n.label ?? null, n.model ?? null, n.costUsd ?? null, n.chargedUsd ?? null, n.sentBy ?? null, n.messageHash ?? null, n.contextId ?? null, n.contextHash ?? null, n.sentAt ?? null, n.deviceId ?? null, n.userId ?? null, keys];
   const r = await q(SAVE_SQL, params);
   const row = r.rows[0] || {};
+  // coste_real va aparte para no tocar la consulta grande de guardado.
+  if (n.costeReal != null && row.id != null) await q(`UPDATE messages SET coste_real = $2 WHERE id = $1`, [row.id, n.costeReal]);
   return { id: row.id != null ? String(row.id) : null, conversationId: row.conversation_id != null ? String(row.conversation_id) : null };
 }
 
@@ -1087,12 +1095,14 @@ app.post('/api/message-cost', wrap(async (req, res) => {
   const model = b.model != null && String(b.model).trim() !== '' ? String(b.model).trim() : null;
   let costUsd = b.costUsd ?? b.cost_usd; costUsd = (costUsd === '' || costUsd == null) ? null : Number(costUsd);
   if (!Number.isFinite(costUsd)) costUsd = null;
+  let costeReal = b.coste_real ?? b.costeReal; costeReal = (costeReal === '' || costeReal == null) ? null : Number(costeReal);
+  if (!Number.isFinite(costeReal)) costeReal = null;
   let execMs = b.executionMs ?? b.execution_ms; execMs = (execMs === '' || execMs == null) ? null : Math.round(Number(execMs));
   if (!Number.isFinite(execMs)) execMs = null;
   const r = await q(
     `UPDATE messages SET model = COALESCE($2, model), cost_usd = COALESCE($3, cost_usd),
-        execution_ms = COALESCE($4, execution_ms)
-     WHERE wamid = $1 RETURNING id, sent_by, model, cost_usd, direction`, [wamid, model, costUsd, execMs]);
+        execution_ms = COALESCE($4, execution_ms), coste_real = COALESCE($5, coste_real)
+     WHERE wamid = $1 RETURNING id, sent_by, model, cost_usd, direction`, [wamid, model, costUsd, execMs, costeReal]);
   // Con el coste y el modelo ya definitivos, recalcula el cobrado por el % del modelo.
   const row = r.rows[0];
   if (row && row.direction === 'out' && row.cost_usd != null) {
