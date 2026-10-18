@@ -1000,9 +1000,13 @@ app.post('/api/save-in', upload.single('file'), wrap(async (req, res) => {
 app.post('/api/save-out', upload.single('file'), wrap(async (req, res) => {
   const n = normalize(req.body || {}, req.file, 'out');
   if (!n.sentBy) n.sentBy = process.env.BOT_NAME || 'Camila';   // por defecto, el bot es Camila
-  // Cobrado real por modelo (si ya viene el coste). Si no, queda la tarifa fija y
-  // /api/message-cost lo recalcula cuando llegue el coste.
-  n.chargedUsd = await chargedFor(n.sentBy, n.model, n.costUsd);
+  // Cobrado: el que manda n8n (charged_usd) es EXACTAMENTE lo que se le descuenta al cliente
+  // en la app (el mismo monto va a /api/messages/log), así que manda. Sin él: por el % del
+  // modelo si ya viene el coste, o la tarifa fija (y /api/message-cost lo recalcula).
+  const b = req.body || {};
+  const cobradoN8n = b.charged_usd ?? b.chargedUsd;
+  const cobrado = cobradoN8n === '' || cobradoN8n == null ? NaN : Number(cobradoN8n);
+  n.chargedUsd = Number.isFinite(cobrado) && cobrado >= 0 ? cobrado : await chargedFor(n.sentBy, n.model, n.costUsd);
   const saved = await saveMessage(n);
   res.json({ ok: true, ...saved });
   // Auto-fusión anti-duplicados: la respuesta del bot suele traer solo el user_id,
