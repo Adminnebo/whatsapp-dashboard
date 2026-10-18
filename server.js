@@ -673,7 +673,13 @@ INSERT INTO messages (conversation_id, wamid, direction, type, text, status, cha
   SELECT conv.id, $4, $7, $6, $3, $8, $10, $11, $12, $13, $15, to_timestamp($5::double precision), $16, $17, $18, $19, $20, $21, $22, $23, $24, to_timestamp($25::double precision), $26 FROM conv
   ON CONFLICT (wamid) DO NOTHING RETURNING id, conversation_id;`;
 
+// Solo se cobra lo que envía el bot (BOT_NAME). Lo que escribe una persona —desde el panel o
+// desde el CRM, que llega por save-out con su nombre en sentBy— se guarda con cobrado 0.
+const BOT_SLUG = slugModelo(process.env.BOT_NAME || 'Camila');
+const esHumano = n => !!n.humano || (n.sentBy != null && String(n.sentBy).trim() !== '' && slugModelo(n.sentBy) !== BOT_SLUG);
+
 async function saveMessage(n) {
+  if (n.direction === 'out' && esHumano(n)) n.chargedUsd = 0;
   // Claves de identidad para el match cruzado (distintas, sin vacíos).
   const keys = [...new Set([n.contactId, n.userId, n.phone]
     .filter(v => v != null && String(v).trim() !== '').map(v => String(v).trim()))];
@@ -1105,7 +1111,7 @@ app.post('/api/message-cost', wrap(async (req, res) => {
      WHERE wamid = $1 RETURNING id, sent_by, model, cost_usd, direction`, [wamid, model, costUsd, execMs, costeReal]);
   // Con el coste y el modelo ya definitivos, recalcula el cobrado por el % del modelo.
   const row = r.rows[0];
-  if (row && row.direction === 'out' && row.cost_usd != null) {
+  if (row && row.direction === 'out' && row.cost_usd != null && !esHumano({ sentBy: row.sent_by })) {
     const charged = await chargedFor(row.sent_by, row.model, Number(row.cost_usd));
     await q(`UPDATE messages SET charged_usd = $2 WHERE id = $1`, [row.id, charged]);
   }
@@ -1678,7 +1684,7 @@ app.post('/api/send', need('inbox.send'), wrap(async (req, res) => {
 
   n.wamid = msgId;
   n.status = sent ? 'sent' : 'failed';
-  n.sentBy = await agentName(req);   // quién lo envió (agente logueado)
+  n.sentBy = await agentName(req); n.humano = true;   // quién lo envió (agente logueado)
   const saved = await saveMessage(n);
   res.json({ id: saved.id, conversationId: saved.conversationId, status: n.status, wamid: msgId, sent, error });
 }));
@@ -2339,7 +2345,7 @@ app.post('/api/send-template', need('inbox.templates'), wrap(async (req, res) =>
     contactId: b.contactId || null, name: b.contactName || null, phone: dest.to || null, userId,
     text: texto, wamid, type: 'text', channel: 'whatsapp', status: 'sent'
   }, null, 'out');
-  n.sentBy = await agentName(req);
+  n.sentBy = await agentName(req); n.humano = true;
   const saved = await saveMessage(n);
   if (saved.id) await q(`UPDATE messages SET template = $1 WHERE id = $2::bigint`, [name, saved.id]);
   res.json({ ok: true, id: saved.id, conversationId: saved.conversationId, wamid, sent: true });
@@ -2348,7 +2354,7 @@ app.post('/api/send-template', need('inbox.templates'), wrap(async (req, res) =>
 app.post('/api/send-media', need('inbox.send'), upload.single('file'), wrap(async (req, res) => {
   const b = req.body || {};
   const n = normalize(b, req.file, 'out');
-  n.sentBy = await agentName(req);   // quién lo envió (agente logueado)
+  n.sentBy = await agentName(req); n.humano = true;   // quién lo envió (agente logueado)
   const saved = await saveMessage(n);
 
   // URL firmada del adjunto: la descargan sin cabeceras tanto Meta como GHL.
