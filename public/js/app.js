@@ -900,7 +900,7 @@
           if (btnJarvis) {
             btnJarvis.addEventListener('click', () => {
               window.open(
-                'https://jarvis-production-71c4.up.railway.app/entrar#t=' + encodeURIComponent(Auth.currentToken),
+                'https://asistente.neboaiconsulting.com/entrar#t=' + encodeURIComponent(Auth.currentToken),
                 '_blank'
               );
             });
