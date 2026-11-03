@@ -968,7 +968,22 @@ app.get('/api/media', wrap(async (req, res) => {
     const seguro = String(row.media_filename).replace(/["\\\r\n]/g, '');
     res.set('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(seguro)}`);
   }
-  res.send(row.media_data);
+  // Rangos de bytes: Safari/iPhone no reproduce <audio>/<video> sin respuestas 206.
+  const buf = row.media_data;
+  res.set('Accept-Ranges', 'bytes');
+  const rango = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+  if (rango && (rango[1] || rango[2])) {
+    let ini, fin;
+    if (rango[1]) { ini = Number(rango[1]); fin = rango[2] ? Math.min(Number(rango[2]), buf.length - 1) : buf.length - 1; }
+    else { ini = Math.max(0, buf.length - Number(rango[2])); fin = buf.length - 1; }   // "bytes=-N": los últimos N
+    if (ini > fin || ini >= buf.length) {
+      res.set('Content-Range', `bytes */${buf.length}`);
+      return res.status(416).end();
+    }
+    res.status(206).set('Content-Range', `bytes ${ini}-${fin}/${buf.length}`);
+    return res.send(buf.subarray(ini, fin + 1));
+  }
+  res.send(buf);
 }));
 
 app.post('/api/save-in', upload.single('file'), wrap(async (req, res) => {

@@ -265,6 +265,16 @@
         }
         frag.appendChild(this.messageNode(m));
       });
+      // Los <audio> ya pintados se reusan: si se recrean, la nota de voz que
+      // estaba sonando se corta a la mitad en cada poll o cambio de check.
+      if (!convChanged) {
+        const viejos = new Map();
+        box.querySelectorAll('audio[src]').forEach(a => viejos.set(a.getAttribute('src'), a));
+        frag.querySelectorAll('audio[src]').forEach(a => {
+          const v = viejos.get(a.getAttribute('src'));
+          if (v) a.replaceWith(v);
+        });
+      }
       box.replaceChildren(frag);
       if (convChanged || nearBottom) box.scrollTop = box.scrollHeight;
       else box.scrollTop = prevScroll;
