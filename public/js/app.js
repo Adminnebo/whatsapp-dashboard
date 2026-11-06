@@ -238,7 +238,7 @@
 
     // Enciende / apaga a Camila para este contacto (escribe bot_status en GHL).
     // Apagar = handoff: el chat se pinta en rojo. Encender lo limpia (y quita la etiqueta).
-    async setStatus(status) {
+    async setStatus(status, returnHours) {
       const c = Store.activeConversation(); if (!c) return;
       const closed = status === 'closed';
       c.status = status;
@@ -255,7 +255,7 @@
       try {
         // Mandamos también el conversationId: si el contacto no tiene ghl_contact_id
         // (contacto Meta), el servidor lo resuelve igual por la conversación.
-        await Api.setGhlField(c.contactId, value, c.id);
+        await Api.setGhlField(c.contactId, value, c.id, closed ? returnHours : null);
         // refleja en la caché para que un re-render no lo revierta
         const entry = Store.ghlByContact[c.contactId];
         if (entry && entry.contact) {
@@ -263,11 +263,38 @@
           const bs = entry.contact.customFields.find(f => f.name === 'Bot Status');
           if (bs) bs.value = value; else entry.contact.customFields.push({ name: 'Bot Status', value });
         }
-        UI.toast(closed ? 'Camila OFF · conversación en manual (handoff)' : 'Camila ON · handoff retirado');
+        UI.toast(!closed ? 'Camila ON · handoff retirado'
+          : 'Camila OFF · conversación en manual (handoff)' + (returnHours ? ` · vuelve sola en ${returnHours} h` : ''));
         if (window.Notifs) Notifs.load();            // refresca el aviso al instante
       } catch (e) {
         UI.toast('No se pudo actualizar GHL: ' + e.message);
       }
+    },
+
+    // Apagar a Camila A MANO: antes de apagarla se elige cuándo vuelve sola para ESTE
+    // cliente. Los handoff automáticos de Camila no pasan por aquí: siguen el horario normal.
+    askHandoffReturn(c) {
+      this._hoConvId = c.id;
+      $('#hoReturn').value = ''; $('#hoOtro').value = ''; $('#hoOtroGroup').hidden = true;
+      const normal = $('#hoNormal');
+      normal.textContent = 'Horario normal';
+      Api.getHandoffConfig().then(cfg => {
+        const m = (cfg && Number(cfg.minutes)) || 0;
+        normal.textContent = !m ? 'Horario normal (no vuelve sola)'
+          : `Horario normal (${m % 60 === 0 ? m / 60 + ' h' : m + ' min'})`;
+      }).catch(() => {});
+      $('#handoffModal').hidden = false;
+    },
+    confirmHandoff() {
+      const sel = $('#hoReturn').value;
+      let hours = null;
+      if (sel === 'otro') {
+        hours = Number($('#hoOtro').value);
+        if (!(hours > 0 && hours <= 720)) { UI.toast('Escribe las horas (de 1 a 720)'); return; }
+      } else if (sel) hours = Number(sel);
+      $('#handoffModal').hidden = true;
+      if (Store.activeId !== this._hoConvId) return;   // cambiaron de chat con el popup abierto
+      this.setStatus('closed', hours);
     },
 
     // ---------- sección Bloqueados ----------
@@ -747,8 +774,12 @@
         const c = Store.activeConversation(); if (!c) return;
         // Decide con el MISMO dato que pinta la etiqueta (handoff). Si usáramos c.status
         // podría estar desfasado y el botón mandaría OFF cuando ya dice OFF.
-        this.setStatus(Store.isHandoff(c) ? 'open' : 'closed');
+        if (Store.isHandoff(c)) this.setStatus('open');
+        else this.askHandoffReturn(c);           // a mano: primero pregunta cuándo vuelve
       });
+      // popup "¿cuándo vuelve Camila?" al apagarla a mano
+      $('#hoReturn').addEventListener('change', e => { $('#hoOtroGroup').hidden = e.target.value !== 'otro'; });
+      $('#hoConfirm').addEventListener('click', () => this.confirmHandoff());
       // bloquear / desbloquear contacto
       const cb = $('#convBlock');
       if (cb) cb.addEventListener('click', () => this.toggleBlock());
@@ -775,13 +806,13 @@
       if (ncTpl) ncTpl.addEventListener('change', () => this.ncTemplateChange());
       // cerrar modales
       document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
-        $('#settingsModal').hidden = true; $('#templateModal').hidden = true; $('#newChatModal').hidden = true;
+        $('#settingsModal').hidden = true; $('#templateModal').hidden = true; $('#newChatModal').hidden = true; $('#handoffModal').hidden = true;
       }));
       // cerrar visor de media
       document.querySelectorAll('[data-mclose]').forEach(b => b.addEventListener('click', () => UI.closeMedia()));
       document.addEventListener('keydown', e => {
         if (e.key === 'Escape') {
-          $('#settingsModal').hidden = true; $('#templateModal').hidden = true; $('#newChatModal').hidden = true;
+          $('#settingsModal').hidden = true; $('#templateModal').hidden = true; $('#newChatModal').hidden = true; $('#handoffModal').hidden = true;
           UI.closeMedia();
         }
       });

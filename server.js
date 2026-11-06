@@ -432,6 +432,9 @@ CREATE TABLE IF NOT EXISTS wa_devices (
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff BOOLEAN DEFAULT false;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_at TIMESTAMPTZ;
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_stopped BOOLEAN DEFAULT false;
+-- Hora de regreso elegida al apagar a Camila A MANO (popup). NULL = sigue el
+-- auto-return global (los handoff de Camila y de la etiqueta de GHL siempre NULL).
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS handoff_return_at TIMESTAMPTZ;
 -- Bloqueo de contacto: el bot NUNCA responde (todos los canales). Distinto del
 -- handoff (temporal, humano): esto es una lista de bloqueo deliberada.
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS blocked BOOLEAN DEFAULT false;
@@ -703,7 +706,7 @@ async function mergeTwoContacts(id1, id2) {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['merge:' + Math.min(Number(id1), Number(id2))]);
     const g = (await client.query(
-      `SELECT c.id, c.ghl_contact_id, c.phone, c.user_id, c.name, c.handoff, c.handoff_stopped, c.handoff_at,
+      `SELECT c.id, c.ghl_contact_id, c.phone, c.user_id, c.name, c.handoff, c.handoff_stopped, c.handoff_at, c.handoff_return_at,
               (SELECT id FROM conversations WHERE contact_id=c.id) AS conv,
               (SELECT count(*)::int FROM messages m JOIN conversations cv ON cv.id=m.conversation_id WHERE cv.contact_id=c.id) AS msgs
        FROM contacts c WHERE c.id = ANY($1::bigint[])`, [[id1, id2]])).rows;
@@ -724,8 +727,8 @@ async function mergeTwoContacts(id1, id2) {
          ghl_contact_id = COALESCE(ghl_contact_id, $2), phone = COALESCE(phone, $3),
          user_id = COALESCE(user_id, $4), name = COALESCE(name, $5),
          handoff = handoff OR $6, handoff_stopped = handoff_stopped OR $7,
-         handoff_at = COALESCE(handoff_at, $8), updated_at = now()
-       WHERE id=$1`, [keep.id, drop.ghl_contact_id, drop.phone, drop.user_id, drop.name, !!drop.handoff, !!drop.handoff_stopped, drop.handoff_at]);
+         handoff_at = COALESCE(handoff_at, $8), handoff_return_at = COALESCE(handoff_return_at, $9), updated_at = now()
+       WHERE id=$1`, [keep.id, drop.ghl_contact_id, drop.phone, drop.user_id, drop.name, !!drop.handoff, !!drop.handoff_stopped, drop.handoff_at, drop.handoff_return_at]);
     if (keepConv) {
       await client.query(
         `WITH last AS (SELECT text, COALESCE(sent_at,created_at) ts, direction, status FROM messages WHERE conversation_id=$1 ORDER BY COALESCE(sent_at,created_at) DESC NULLS LAST, id DESC LIMIT 1),
@@ -1146,7 +1149,7 @@ app.post('/api/delete-conversation', need('inbox.delete'), wrap(async (req, res)
   if (row) {
     // Sin conversación no hay nada que atender: el contacto deja de contar como handoff
     // (si no, se quedaría marcado para siempre e inflaría el contador de la pestaña).
-    if (cid) await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
+    if (cid) await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL, handoff_return_at = NULL
                       WHERE ghl_contact_id = $1`, [cid]);
     // Espejo → bot ON (si vuelve a escribir, que el bot no quede mudo en Supabase).
     if (cr.rows[0]) await mirrorBotActive({ phone: cr.rows[0].phone, userId: cr.rows[0].user_id, active: true });
@@ -1350,6 +1353,10 @@ app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
   const value = String((req.body && req.body.value) != null ? req.body.value : '');
   if (!contactId && !convId) return res.json({ ok: false });
   const closed = String(value).toUpperCase() === 'STOP';   // closed = Camila OFF
+  // Horas hasta que Camila vuelva sola, elegidas en el popup al apagarla a mano.
+  // Sin valor = sigue el auto-return global (y no pisa una hora ya elegida).
+  let returnHours = Number(req.body && req.body.returnHours);
+  returnHours = Number.isFinite(returnHours) && returnHours > 0 ? Math.min(Math.round(returnHours * 60) / 60, 720) : null;
 
   // Resolver el contacto por ghl_contact_id O por la conversación (los contactos
   // 100% Meta no tienen ghl_contact_id → hay que ubicarlos por conversationId).
@@ -1365,7 +1372,7 @@ app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
 
   // Contacto protegido: no se puede apagar. Se ignora el intento y se deja a Camila ON.
   if (closed && isProtected(c.ghl_contact_id, c.phone, c.user_id, contactId)) {
-    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [c.id]);
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL, handoff_return_at = NULL WHERE id = $1`, [c.id]);
     await logAction(req, 'conv_close_blocked', c.ghl_contact_id || String(c.id), 'Intento de apagar a Camila ignorado (contacto protegido)');
     return res.json({ ok: true, contactId: c.ghl_contact_id, conversationId: c.conv_id ? String(c.conv_id) : null, handoff: false, protected: true });
   }
@@ -1379,7 +1386,10 @@ app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
 
   if (closed) {
     await q(`UPDATE contacts SET handoff = true, handoff_stopped = true,
-                handoff_at = COALESCE(handoff_at, now()) WHERE id = $1`, [c.id]);
+                handoff_at = COALESCE(handoff_at, now()),
+                handoff_return_at = CASE WHEN $2::float8 IS NULL THEN handoff_return_at
+                                         ELSE now() + make_interval(mins => round($2::float8 * 60)::int) END
+              WHERE id = $1`, [c.id, returnHours]);
     if (!c.handoff) {   // notificar solo la primera vez
       await notify({
         type: 'handoff', contactId: c.ghl_contact_id, conversationId: c.conv_id,
@@ -1389,7 +1399,7 @@ app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
       });
     }
   } else {
-    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [c.id]);
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL, handoff_return_at = NULL WHERE id = $1`, [c.id]);
     if (c.ghl_contact_id) await quitarTagHandoff(c.ghl_contact_id).catch(e => console.error('quitarTagHandoff', e.message));
   }
   // Espejo a Supabase: el user_id de Meta puede estar en user_id o en ghl_contact_id.
@@ -1397,8 +1407,9 @@ app.post('/api/ghl-set-field', need('inbox.camila'), wrap(async (req, res) => {
   await mirrorBotActive({ phone: c.phone, userId: uid, active: !closed });
 
   await logAction(req, closed ? 'conv_close' : 'conv_open', c.ghl_contact_id || String(c.id),
-    closed ? 'Apagó a Camila (conversación manual)' : 'Encendió a Camila (quitó el handoff)');
-  res.json({ ok: true, contactId: c.ghl_contact_id, conversationId: c.conv_id ? String(c.conv_id) : null, handoff: closed });
+    closed ? 'Apagó a Camila (conversación manual)' + (returnHours ? `, vuelve sola en ${returnHours} h` : '')
+           : 'Encendió a Camila (quitó el handoff)');
+  res.json({ ok: true, contactId: c.ghl_contact_id, conversationId: c.conv_id ? String(c.conv_id) : null, handoff: closed, returnHours });
 }));
 
 // Contactos con la etiqueta handoff. Sirve del cache en DB (lo mantiene scanHandoff);
@@ -1459,7 +1470,7 @@ app.post('/api/handoff-set', wrap(async (req, res) => {
 
   // Contacto protegido: nunca entra en handoff. Se ignora el intento y se deja a Camila ON.
   if (!active && isProtected(row.ghl_contact_id, row.phone, row.user_id, ext, phoneIn)) {
-    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [row.id]);
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL, handoff_return_at = NULL WHERE id = $1`, [row.id]);
     await mirrorBotActive({ phone: sbPhone, userId: sbUser, active: true });
     await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
              VALUES ('conv_open', 'Sistema (protegido)', $1, 'Handoff ignorado: contacto protegido')`, [row.ghl_contact_id]);
@@ -1479,7 +1490,7 @@ app.post('/api/handoff-set', wrap(async (req, res) => {
     });
     await mirrorBotActive({ phone: sbPhone, userId: sbUser, active: false });
   } else {
-    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL WHERE id = $1`, [row.id]);
+    await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL, handoff_return_at = NULL WHERE id = $1`, [row.id]);
     // Reactivar el bot SOLO si el contacto no está bloqueado (el bloqueo manda).
     await mirrorBotActive({ phone: sbPhone, userId: sbUser, active: !row.blocked });
   }
@@ -2646,21 +2657,24 @@ setTimeout(scanHandoffTick, 5 * 1000);     // primera pasada al arrancar
 // Reactivar = lo mismo que el botón "Camila ON": bot_status='' en GHL, se quita
 // la etiqueta handoff y se limpia el estado en la DB.
 async function scanHandoffAutoReturn() {
+  await scanHandoffReturnPropio();
   if (!GHL_PIT || !LOCATION_ID) return;
   try {
     const mins = await getHandoffReturnMins();
     if (!mins) return;   // desactivado
+    // Los apagados a mano con hora propia (handoff_return_at) los lleva scanHandoffReturnPropio.
     const vencidos = await q(
       `SELECT ghl_contact_id, phone, user_id, EXTRACT(EPOCH FROM (now() - handoff_at))::bigint AS secs
          FROM contacts
         WHERE handoff = true AND handoff_at IS NOT NULL AND ghl_contact_id IS NOT NULL
+          AND handoff_return_at IS NULL
           AND handoff_at < now() - make_interval(mins => $1::int)`, [mins]);
     for (const c of vencidos.rows) {
       try {
         // Si GHL falla, no tocamos la DB: se reintenta en el próximo ciclo.
         if (!await setBotStatus(c.ghl_contact_id, '')) continue;
         await quitarTagHandoff(c.ghl_contact_id).catch(e => console.error('auto-return quitarTag', e.message));
-        await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL
+        await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL, handoff_return_at = NULL
                  WHERE ghl_contact_id = $1`, [c.ghl_contact_id]);
         await mirrorBotActive({ phone: c.phone, userId: c.user_id, active: true });   // espejo → bot ON
         await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
@@ -2670,6 +2684,36 @@ async function scanHandoffAutoReturn() {
       } catch (e) { console.error('auto-return', c.ghl_contact_id, e.message); }
     }
   } catch (e) { console.error('scanHandoffAutoReturn', e.message); }
+}
+// Apagados a mano con hora de regreso elegida en el popup: a esa hora vuelve Camila,
+// igual que el botón "Camila ON" (GHL best-effort). Corre aunque el global esté en 0.
+async function scanHandoffReturnPropio() {
+  try {
+    const vencidos = await q(
+      `SELECT id, ghl_contact_id, phone, user_id, blocked,
+              round(EXTRACT(EPOCH FROM (now() - handoff_at)) / 3600)::int AS horas
+         FROM contacts
+        WHERE handoff = true AND handoff_return_at IS NOT NULL AND handoff_return_at <= now()`);
+    for (const c of vencidos.rows) {
+      try {
+        if (c.ghl_contact_id) {
+          await setBotStatus(c.ghl_contact_id, '').catch(e => console.error('return propio GHL', e.message));
+          await quitarTagHandoff(c.ghl_contact_id).catch(e => console.error('return propio quitarTag', e.message));
+        }
+        // Solo si nadie lo cambió mientras tanto (lo encendieron o eligieron otra hora).
+        const upd = await q(`UPDATE contacts SET handoff = false, handoff_stopped = false, handoff_at = NULL, handoff_return_at = NULL
+                             WHERE id = $1 AND handoff = true AND handoff_return_at <= now()`, [c.id]);
+        if (!upd.rowCount) continue;
+        // Espejo → bot ON. Como en el botón: el user_id de Meta puede estar en ghl_contact_id.
+        const uid = c.user_id || (/^[A-Za-z]{2}\.\d+$/.test(c.ghl_contact_id || '') ? c.ghl_contact_id : null);
+        await mirrorBotActive({ phone: c.phone, userId: uid, active: !c.blocked });
+        await q(`INSERT INTO action_logs (action, actor_name, contact_id, detail)
+                 VALUES ('conv_open', 'Sistema (auto-return)', $1, $2)`,
+          [c.ghl_contact_id || String(c.id), `Camila reactivada a la hora elegida al apagarla (${c.horas || 0} h en handoff)`]);
+        console.log('[handoff] return propio: Camila ON para', c.ghl_contact_id || c.id);
+      } catch (e) { console.error('return propio', c.id, e.message); }
+    }
+  } catch (e) { console.error('scanHandoffReturnPropio', e.message); }
 }
 setInterval(scanHandoffAutoReturn, 60 * 1000);   // cada minuto
 setTimeout(scanHandoffAutoReturn, 20 * 1000);    // primera pasada al arrancar

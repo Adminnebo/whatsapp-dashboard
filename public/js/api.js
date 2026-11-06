@@ -213,14 +213,15 @@
     // Escribe el custom field bot_status del contacto en GHL.
     // value: 'STOP' (cerrar → detener bot) o '' (abrir → reactivar).
     // ---------------------------------------------------------------
-    async setGhlField(contactId, value, conversationId) {
+    async setGhlField(contactId, value, conversationId, returnHours) {
       if (!S().ghlFieldUrl) return null;
       return await http(S().ghlFieldUrl, {
         method: 'POST',
         headers: headers(),
         // conversationId permite resolver el contacto aunque no tenga ghl_contact_id
         // (contactos 100% Meta creados por el flujo nuevo).
-        body: JSON.stringify({ contactId, value, conversationId })
+        // returnHours: horas hasta que Camila vuelva sola (popup al apagar a mano).
+        body: JSON.stringify({ contactId, value, conversationId, returnHours: returnHours || undefined })
       });
     },
 
